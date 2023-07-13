@@ -132,7 +132,7 @@ myMain options = do
 {-| program entry point -}
 main ∷ MonadIO μ ⇒ μ ()
 main = do
-  let progDesc = "list the members of a nix profile"
+  let progDesc = "list the members of a nix profile" ∷ 𝕋
   getArgs ≫ stdMainNoDR progDesc parseOptions (myMain @UsageFPIOTPError)
 
 -- that's all, folks! ----------------------------------------------------------

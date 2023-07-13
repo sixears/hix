@@ -23,8 +23,9 @@ import FPath.AbsDir            ( AbsDir )
 import FPath.AsFilePath        ( filepath )
 import FPath.AbsFile           ( AbsFile )
 import FPath.AppendableFPath   ( (⫻) )
+import FPath.Dir               ( Dir( DirA, DirR ) )
 import FPath.Error.FPathError  ( AsFPathError )
-import FPath.Parseable         ( parse )
+import FPath.Parseable         ( parseDir )
 import FPath.RelDir            ( reldir )
 import FPath.RelFile           ( relfile )
 
@@ -61,10 +62,6 @@ import MonadIO.User   ( homePath )
 
 import Data.MoreUnicode.Monad  ( (⋘) )
 
--- text --------------------------------
-
-import Data.Text  ( unsnoc )
-
 -- textual-plus ------------------------
 
 import TextualPlus                         ( tparse )
@@ -76,7 +73,7 @@ import TextualPlus.Error.TextualParseError ( TextualParseError )
 
 import Nix.Profile.AttrPath   ( apPkg )
 import Nix.Profile.StorePath  ( spPkgVerPath )
-import Nix.Profile.Types      ( Pkg, Ver )
+import Nix.Types              ( Pkg, Ver )
 
 --------------------------------------------------------------------------------
 
@@ -120,10 +117,11 @@ profileManifest ∷ ∀ ε τ ω μ .
                    Printable τ, MonadIO μ) ⇒
                   τ → μ AbsFile
 profileManifest (toText → d) = do
-  dir ← case unsnoc d of
-    𝕹          → nixProfile
-    𝕵 (_, c) → do d' ← parse (d ⊕ case c of '/' → ""; _ → "/")
-                  nixProfiles ⊲ (⫻ d')
+  dir ← if d ≡ ""
+        then nixProfile
+        else parseDir d ≫ \ case
+             DirR d' → nixProfiles ⊲ (⫻ d')
+             DirA d' → return d'
 
   fexists Informational FExists dir NoMock ≫ \ case
     NoFExists → throwUserError $ [fmtT|No such profile dir '%T'|] dir

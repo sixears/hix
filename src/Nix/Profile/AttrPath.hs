@@ -39,7 +39,7 @@ import TextualPlus.Error.TextualParseError
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Profile.Types  ( Pkg( unPkg ) )
+import Nix.Types  ( Pkg( unPkg ) )
 
 --------------------------------------------------------------------------------
 

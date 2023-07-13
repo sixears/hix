@@ -45,7 +45,7 @@ import TextualPlus  ( TextualPlus( textual' ), checkT )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Profile.Types  ( Hash( unHash ), Pkg( unPkg ), Ver( unVer ) )
+import Nix.Types  ( Hash( unHash ), Pkg( unPkg ), Ver( unVer ), pkgRE )
 
 --------------------------------------------------------------------------------
 
@@ -71,8 +71,8 @@ data StorePath = StorePath { _path' ∷ AbsDir
 storePathRE ∷ CharParsing η ⇒ η (Hash, Pkg, 𝕄 Ver)
 storePathRE =
   let
-    pkgRE ∷ CharParsing η ⇒ η (𝕊, 𝕄 𝕊)
-    pkgRE =
+    _pkgRE ∷ CharParsing η ⇒ η (𝕊, 𝕄 𝕊)
+    _pkgRE =
       let
         alpha_under_score      ∷ CharParsing η ⇒ η ℂ
         alpha_under_score      = satisfy (\ c → isAlpha c ∨ c ≡ '_')
@@ -89,7 +89,7 @@ storePathRE =
       in
         ((,) ⊳ hyphenated_identifiers ⊵ optional(char '-' ⋫ numeric_identifier))
   in
-    (\ h (p,v) → (fromString h, fromString p, fromString ⊳ v)) ⊳
+    (\ h (p,v) → (fromString h, p, v)) ⊳
       (string "/nix/store/" ⋫ count 32 alphaNum) ⊵ (char '-' ⋫ pkgRE)
 
 instance Printable StorePath where
