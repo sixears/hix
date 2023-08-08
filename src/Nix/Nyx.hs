@@ -1,169 +1,181 @@
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveAnyClass      #-}
+{-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE UnicodeSyntax       #-}
 
 {-| nyx program to manage local configurations -}
 module Nix.Nyx
-  ( main )
-where
+  ( main
+  ) where
 
 import Base1T
 
-import Debug.Trace  ( trace, traceShow )
-import Prelude  ( Int, Integral )
+import Debug.Trace ( trace, traceShow )
+import Prelude     ( Int, Integral, Num, (*) )
 
-import qualified  Natural
+import Natural qualified
 
 -- aeson -------------------------------
 
-import Data.Aeson  ( FromJSON( parseJSON )
-                   , (.:), (.:?)
-                   , defaultOptions, eitherDecodeStrict', fieldLabelModifier
-                   , genericParseJSON, withObject
-                   )
+import Data.Aeson ( FromJSON(parseJSON), defaultOptions, eitherDecodeStrict',
+                    fieldLabelModifier, genericParseJSON, withObject, (.:),
+                    (.:?) )
 
 -- base --------------------------------
 
-import Data.Foldable  ( Foldable )
-import Data.Function  ( flip )
-import Data.Functor   ( Functor )
-import Data.List      ( any, filter, maximum )
-import GHC.Generics   ( Generic )
+import Data.Foldable    ( Foldable )
+import Data.Function    ( flip )
+import Data.Functor     ( Functor )
+import Data.List        ( any, filter, maximum, unzip3 )
+import Data.Traversable ( traverse )
+import GHC.Generics     ( Generic )
 
 -- containers --------------------------
 
-import qualified Data.Map.Strict  as  Map
+import Data.Map.Strict qualified as Map
 
 -- data-textual ------------------------
 
-import Data.Textual  ( Parsed( Malformed, Parsed ), Textual( textual ) )
+import Data.Textual ( Parsed(Malformed, Parsed), Textual(textual) )
 
 -- deepseq -----------------------------
 
-import Control.DeepSeq  ( NFData )
+import Control.DeepSeq ( NFData )
 
 -- fpath -------------------------------
 
-import FPath.AbsDir            ( AbsDir, absdir )
-import FPath.AbsFile           ( AbsFile, absfile )
-import FPath.AppendableFPath   ( AppendableFPath, AppendableFPathD
-                               , AppendableFPathF, (⫻) )
-import FPath.AsFilePath        ( filepath )
-import FPath.Basename          ( basename )
-import FPath.Dir               ( DirAs )
-import FPath.DirType           ( DirType )
-import FPath.Error.FPathError  ( AsFPathError( _FPathError ) )
-import FPath.Parseable         ( parse )
-import FPath.PathComponent     ( PathComponent )
-import FPath.RelDir            ( RelDir, reldir )
-import FPath.RelFile           ( RelFile, relfile )
-import FPath.ToDir             ( ToDir )
-import Text.Read               ( Read )
+import FPath.AbsDir           ( AbsDir, absdir )
+import FPath.AbsFile          ( AbsFile, absfile )
+import FPath.AppendableFPath  ( AppendableFPath, AppendableFPathD,
+                                AppendableFPathF, (⫻) )
+import FPath.AsFilePath       ( AsFilePath, filepath )
+import FPath.Basename         ( basename )
+import FPath.Dir              ( DirAs )
+import FPath.DirType          ( DirType )
+import FPath.Error.FPathError ( AsFPathError(_FPathError) )
+import FPath.Parseable        ( parse )
+import FPath.PathComponent    ( PathComponent )
+import FPath.RelDir           ( RelDir, reldir )
+import FPath.RelFile          ( RelFile, relfile )
+import FPath.ToDir            ( ToDir )
+import Text.Read              ( Read )
 
 -- lens --------------------------------
 
-import Control.Lens.Getter  ( view )
-import Control.Lens.Tuple   ( _1, _2 )
+import Control.Lens.Each   ( each )
+import Control.Lens.Fold   ( (^..) )
+import Control.Lens.Getter ( Getting, view )
+import Control.Lens.Setter ( over )
+import Control.Lens.Tuple  ( _1, _2, _3 )
 
 -- log-plus ----------------------------
 
-import Log  ( Log, logIO )
+import Log ( Log, logIO )
 
 -- logging-effect ----------------------
 
-import Control.Monad.Log  ( LoggingT, MonadLog, Severity( Informational ) )
+import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational) )
 
 -- mockio ------------------------------
 
-import MockIO.DoMock   ( DoMock( NoMock ) )
-import MockIO.IOClass  ( HasIOClass, IOClass( IORead, IOWrite ), ioClass )
+import MockIO.DoMock  ( DoMock(NoMock) )
+import MockIO.IOClass ( HasIOClass, IOClass(IORead, IOWrite), ioClass )
 
 -- mockio-log --------------------------
 
-import MockIO.Log  ( HasDoMock, MockIOClass
-                   , doMock, logResult, mkIOL, mkIOLME, mkIOLMER )
+import MockIO.Log ( HasDoMock, MockIOClass, doMock, logResult, mkIOL, mkIOLME,
+                    mkIOLMER )
 
 -- mockio-plus -------------------------
 
-import MockIO.Directory          ( lsdir' )
-import MockIO.File               ( FExists( FExists ), fexists )
-import MockIO.Process            ( ꙫ )
-import MockIO.Process.MLCmdSpec  ( MLCmdSpec, mock_value )
+import MockIO.Directory             ( lsdir' )
+import MockIO.File                  ( FExists(FExists), fexists )
+import MockIO.Process               ( ꙫ )
+import MockIO.Process.MLCmdSpec     ( MLCmdSpec, ToMLCmdSpec, mock_value )
+import MockIO.Process.OutputDefault ( OutputDefault )
 
 -- monaderror-io -----------------------
 
-import MonadError.IO.Error  ( throwUserError )
+import MonadError.IO.Error ( throwUserError )
 
 -- monadio-plus ------------------------
 
-import MonadIO                        ( say )
-import MonadIO.Base                   ( getArgs )
-import MonadIO.Error.CreateProcError  ( AsCreateProcError( _CreateProcError ) )
-import MonadIO.Error.ProcExitError    ( AsProcExitError( _ProcExitError ) )
-import MonadIO.Process.ExitInfo       ( ExitInfo )
-import MonadIO.Process.ExitStatus     ( evOK )
-import MonadIO.User                   ( homePath, getUserName' )
+import MonadIO                       ( say )
+import MonadIO.Base                  ( getArgs )
+import MonadIO.Error.CreateProcError ( AsCreateProcError(_CreateProcError) )
+import MonadIO.Error.ProcExitError   ( AsProcExitError(_ProcExitError) )
+import MonadIO.Process.ExitInfo      ( ExitInfo )
+import MonadIO.Process.ExitStatus    ( ExitStatus, evOK )
+import MonadIO.Process.MakeProc      ( MakeProc )
+import MonadIO.Process.OutputHandles ( OutputHandles )
+import MonadIO.Process.ToMaybeTexts  ( ToMaybeTexts )
+import MonadIO.User                  ( getUserName', homePath )
 
 -- mtl ---------------------------------
 
-import Control.Monad.Except  ( throwError )
-import Control.Monad.Reader  ( runReaderT )
+import Control.Monad.Except ( throwError )
+import Control.Monad.Reader ( MonadReader, runReaderT )
 
 -- natural -----------------------------
 
-import Natural  ( length, replicate )
+import Natural ( length, replicate )
 
 -- optparse-applicative ----------------
 
-import Options.Applicative.Builder      ( argument, auto, metavar )
-import Options.Applicative.Help.Pretty  ( (<$$>)
-                                        , align, empty, fillSep, text, vcat )
-import Options.Applicative.Types        ( Parser )
+import Options.Applicative.Builder     ( argument, auto, command, info, metavar,
+                                         progDesc, subparser )
+import Options.Applicative.Help.Pretty ( align, empty, fillSep, text, vcat,
+                                         (<$$>) )
+import Options.Applicative.Types       ( Parser )
 
 -- optparse-plus -----------------------
 
-import OptParsePlus  ( (⊞), readT, toDocTs )
+import OptParsePlus ( readT, toDocTs, (⊞) )
 
 -- parsers -----------------------------
 
-import Text.Parser.Char  ( string )
+import Text.Parser.Char ( string )
+
+-- safe --------------------------------
+
+import Safe ( maximumDef )
 
 -- stdmain -----------------------------
 
-import StdMain             ( stdMain )
-import StdMain.UsageError  ( AsUsageError( _UsageError ), UsageFPathIOError
-                           , UsageParseFPProcIOError
-                           , UsageParseAesonFPPIOError
-                           )
+import StdMain            ( stdMain )
+import StdMain.UsageError ( AsUsageError(_UsageError), UsageFPathIOError,
+                            UsageParseAesonFPPIOError, UsageParseFPProcIOError )
 
 -- text --------------------------------
 
-import Data.Text           ( concat, intercalate, pack, unpack )
-import Data.Text.Encoding  ( encodeUtf8 )
+import Data.Text          ( concat, intercalate, pack, unpack )
+import Data.Text.Encoding ( encodeUtf8 )
 
 -- textual-plus ------------------------
 
-import qualified TextualPlus
+import TextualPlus qualified
 
-import TextualPlus.Error.TextualParseError
-               ( AsTextualParseError( _TextualParseError ), TextualParseError )
+import TextualPlus.Error.TextualParseError ( AsTextualParseError(_TextualParseError),
+                                             TextualParseError )
 
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
 
-import qualified  Nix.Paths  as  Paths
+import Nix.Paths qualified as Paths
 
-import Data.Aeson.Error  ( AesonError, AsAesonError( _AesonError )
-                         , throwAsAesonError )
+import Data.Aeson.Error ( AesonError, AsAesonError(_AesonError),
+                          throwAsAesonError )
 
-import Nix.Flake  ( FlakePkgs, forX86_64Pkg, forMX86_64Pkg, forMX86_64Pkg_, pkg
-                  , ver, x86_64, x86_64_ )
-import Nix.Types  ( Arch, Pkg, Ver, pkgRE )
+import Nix.Flake ( FlakePkgs, forMX86_64Pkg, forMX86_64Pkg_, forX86_64Pkg, pkg,
+                   ver, x86_64, x86_64_ )
+import Nix.Types ( Arch, Pkg, Ver, pkgRE )
 
 --------------------------------------------------------------------------------
 
 ------------------------------------------------------------
 
-newtype ProfileName = ProfileName { unProfileName ∷ PathComponent }
+newtype ProfileName = ProfileName { unProfileName :: PathComponent }
 
 userProfileName ∷ ∀ ε μ .
               (MonadIO μ,AsIOError ε,AsFPathError ε,Printable ε,MonadError ε μ)⇒
@@ -178,20 +190,27 @@ userProfileNameRelDir = (fromList ∘ pure ∘ unProfileName) ⊳ userProfileNam
 
 ------------------------------------------------------------
 
-data Mode = ModeShowConfigs
+data Mode = ModeListPkgs | ModeListConfigs
 
 instance Printable Mode where
 
 instance Textual Mode where
-  textual = string "show-configs" ⋫ pure ModeShowConfigs
+  textual = string "list-packages"    ⋫ pure ModeListPkgs
+          ∤ string "list-config-dirs" ⋫ pure ModeListConfigs
 
-data Options = Options { mode ∷ Mode }
+-- XXX This should be a sub-command or similar
+
+data Options = Options { mode :: Mode
+                       }
 
 ----------------------------------------
 
 {-| cmdline options parser -}
 parseOptions ∷ Parser Options
-parseOptions = Options ⊳ argument readT (metavar "MODE")
+parseOptions =
+  Options ⊳ subparser ( command "list-packages" (info (pure ModeListPkgs) (progDesc "list packages")) ⊕ command "list-config-dirs" (info (pure ModeListConfigs) (progDesc "list config directories")))
+
+--  argument readT (metavar "MODE")
 
 ------------------------------------------------------------
 
@@ -264,6 +283,7 @@ allConfigs = do
   flakes ← (return proto_flakes) ≫ filterM fexists_
   return $ flakes
 
+flakeShowTestInput ∷ 𝕋
 flakeShowTestInput =
   concat [ "{ \"packages\": {"
          , "    \"x86_64-linux\": {"
@@ -290,38 +310,83 @@ flakeShowTestInput =
          , "}"
          ]
 
--- nix flake show #flake
+----------------------------------------
+
+{-| nix flake show #flake -}
+nix_flake_show ∷ ∀ ε δ α ξ ζ μ .
+                 (MonadIO μ, DirAs α,
+                  AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                  AsProcExitError ε, Printable ε, MonadError ε μ,
+                  OutputDefault ξ, ToMaybeTexts ξ, OutputHandles ζ ξ,
+                  ToMLCmdSpec (AbsFile, [𝕋], MLCmdSpec 𝕋 → MLCmdSpec 𝕋) ξ,
+                  MakeProc ζ,
+                  HasDoMock δ, MonadReader δ μ,
+                  MonadLog (Log MockIOClass) μ) ⇒
+                 α → μ (ExitInfo, ξ)
 nix_flake_show flake =
-  ꙫ (Paths.nix, ["flake", "show", "--json", pack $ flake ⫥ filepath],
-     ((\ f → f & mock_value ⊢ (evOK,flakeShowTestInput)) ∷ MLCmdSpec 𝕋 → MLCmdSpec 𝕋)
-    )
+  let mock_set ∷ MLCmdSpec 𝕋 → MLCmdSpec 𝕋
+      mock_set = let mock_val ∷ (ExitStatus, 𝕋) = (evOK, flakeShowTestInput)
+                 in  (& mock_value ⊢ mock_val)
+      args     = ["flake", "show", "--json", pack $ flake ⫥ filepath]
+  in  ꙫ (Paths.nix, args, mock_set)
+
+nix_flake_show' ∷ ∀ ε δ μ .
+                  (Printable ε, MonadError ε μ, AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                   AsProcExitError ε,  MonadIO μ, HasDoMock δ, MonadReader δ μ,
+                   MonadLog (Log MockIOClass) μ) ⇒
+                  AbsDir → μ (ExitInfo, 𝕋)
+nix_flake_show' = nix_flake_show
+
+nix_flake_show'' ∷ ∀ ε δ μ .
+                   (Printable ε, MonadError ε μ, AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                    AsProcExitError ε,  MonadIO μ, HasDoMock δ, MonadReader δ μ,
+                    MonadLog (Log MockIOClass) μ) ⇒
+                   AbsDir → μ (𝔼 𝕊 FlakePkgs)
+nix_flake_show'' d = snd ⊳ nix_flake_show' d ≫ \ s → return $ eitherDecodeStrict' (encodeUtf8 s)
+
+natNeg ∷ ℕ → ℕ → ℕ
+natNeg x y = if x ≥ y then x - y else 0
+
+(⊖) ∷ ℕ → ℕ → ℕ
+(⊖) = natNeg
+
+data NumSign = SignPlus | SignMinus
+
+unNegate ∷ ℤ → (NumSign,ℕ)
+unNegate n | n < 0     = (SignMinus, fromIntegral $ abs n)
+           | otherwise = (SignPlus,  fromIntegral n)
+
+pad_t ∷ ℤ → 𝕋 → 𝕋
+pad_t (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ⊕ t
+pad_t (unNegate → (SignPlus, n)) t = t ⊕ replicate @𝕋 (n ⊖ length t) ' '
 
 myMain ∷ ∀ ε . (HasCallStack,
                 AsUsageError ε, AsIOError ε, AsFPathError ε, AsCreateProcError ε, AsProcExitError ε, AsAesonError ε, Printable ε) ⇒
          DoMock → Options → LoggingT (Log MockIOClass) (ExceptT ε IO) Word8
-myMain do_mock _ = flip runReaderT do_mock $ do
-  allConfigs ≫ mapM_ say
-  (_,(stdout∷𝕋)) ← nix_flake_show [absdir|/home/martyn/nix/default/|]
--- N-COLUMN DISPLAY
-  xs' ← case eitherDecodeStrict' @FlakePkgs (encodeUtf8 stdout) of
-          𝕽 pkgs → return ∘ Map.toList $ Map.map (\ fp → (fp ⊣ pkg, fp ⊣ ver)) $ pkgs ⊣ x86_64_
-          𝕷 e    → throwAsAesonError e
-  let max_l ∷ (Foldable ψ, Functor ψ, Printable α) ⇒ (β → α) → ψ β → ℕ
-      max_l f = maximum ∘ fmap  (length ∘ toText ∘ f)
-      fromIntegral0 ∷ Integral α ⇒ α → ℕ
-      fromIntegral0 a | a < 0     = 0
-                      | otherwise = fromIntegral a
-      p_l ∷ ℕ = maximum ((length ∘ toText ∘ view _1) ⊳ xs')
-      pad_p t =
-        t ⊕ replicate @𝕋 (p_l - length t) ' '
-      p'_l ∷ ℕ = maximum ((length ∘ toText ∘ view (_2 ∘ _1)) ⊳ xs')
-      pad_p' t =
-        t ⊕ replicate @𝕋 (p'_l - length t) ' '
-  let sprint_ppv (p,(p',v)) =
-        [fmtT|%T\t%T\t%T|] (pad_p $ toText p) (pad_p' $ toText p')
-                           (maybe "" toText v)
-  forM_ xs' (say ∘ sprint_ppv)
-  return 0
+myMain do_mock opts = flip runReaderT do_mock $
+  case mode opts of
+    ModeListPkgs -> do
+
+      allConfigs ≫ mapM_ say
+      xs ∷ [(𝕋,𝕋,𝕋)] ← nix_flake_show'' [absdir|/home/martyn/nix/default/|] ≫ \case
+               𝕽 pkgs → return ∘ Map.foldMapWithKey (\ p fp → [(toText $ p, toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver)]) $ pkgs ⊣ x86_64_
+               𝕷 e    → throwAsAesonError e
+
+-- XXX turn this into a columnify function
+
+--  let pads = (PadLeft,PadLeft,PadRight)
+
+      let lengths ∷ (ℤ,ℤ,ℤ) =
+           (& _1 ⊧ fromIntegral) $
+           (& _2 ⊧ fromIntegral) $
+           (& _3 ⊧ (*(-1)) ∘ fromIntegral) $
+           (unzip3 xs) & each ⊧ (\ ys → maximumDef 0 $ length ⊳ ys)
+
+      let sprint_ppv zs =
+           let zip3TWith f (a,b,c) (x,y,z) = ((f a x), (f b y), (f c z))
+           in  intercalate "\t" $ (^.. each) $ (zip3TWith pad_t lengths zs)
+      forM_ xs (say ∘ sprint_ppv)
+      return 0
 
 {-| program main entry point -}
 main ∷ MonadIO μ ⇒ μ ()
@@ -329,10 +394,10 @@ main = do
 -- ?add logging options
 -- show all configs (as option)
   let progDesc =
-        -- the values of show_configs, etc., will be wrapped as necessary
-        let show_configs = fillSep [ toDocTs [ "show the location of configs"] ]
+        -- the values of list_packages, etc., will be wrapped as necessary
+        let list_packages = fillSep [ toDocTs [ "list the available packages of a config"] ]
         in vcat [ "manage nix configs for ~home installation\n\nModes:"
-                , empty <$$> text "show-configs" ⊞ align show_configs ]
-  getArgs ≫ stdMain progDesc parseOptions (myMain {- @UsageParseFPProcIOError -} @UsageParseAesonFPPIOError)
+                , empty <$$> text "list-packages" ⊞ align list_packages ]
+  getArgs ≫ stdMain progDesc parseOptions (myMain @UsageParseAesonFPPIOError)
 
 -- that's all, folks! ----------------------------------------------------------
