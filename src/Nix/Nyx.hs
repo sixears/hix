@@ -344,6 +344,17 @@ nix_flake_show'' ∷ ∀ ε δ μ .
                    AbsDir → μ (𝔼 𝕊 FlakePkgs)
 nix_flake_show'' d = snd ⊳ nix_flake_show' d ≫ \ s → return $ eitherDecodeStrict' (encodeUtf8 s)
 
+nix_flake_show''' ∷ ∀ ε δ μ .
+                    (Printable ε, MonadError ε μ, AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                     AsProcExitError ε, AsAesonError ε,  MonadIO μ, HasDoMock δ, MonadReader δ μ,
+                     MonadLog (Log MockIOClass) μ) ⇒
+                    AbsDir → μ [(𝕋,𝕋,𝕋)]
+
+nix_flake_show''' d = nix_flake_show'' d ≫ \ case
+  𝕽 pkgs → return ∘ Map.foldMapWithKey (\ p fp → [(toText $ p, toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver)]) $ pkgs ⊣ x86_64_
+  𝕷 e    → throwAsAesonError e
+
+
 natNeg ∷ ℕ → ℕ → ℕ
 natNeg x y = if x ≥ y then x - y else 0
 
@@ -368,10 +379,8 @@ myMain do_mock opts = flip runReaderT do_mock $
     ModeListPkgs -> do
 
       allConfigs ≫ mapM_ say
-      xs ∷ [(𝕋,𝕋,𝕋)] ← nix_flake_show'' [absdir|/home/martyn/nix/default/|] ≫ \case
-               𝕽 pkgs → return ∘ Map.foldMapWithKey (\ p fp → [(toText $ p, toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver)]) $ pkgs ⊣ x86_64_
-               𝕷 e    → throwAsAesonError e
 
+      xs ∷ [(𝕋,𝕋,𝕋)] ← nix_flake_show''' [absdir|/home/martyn/nix/default/|]
 -- XXX turn this into a columnify function
 
 --  let pads = (PadLeft,PadLeft,PadRight)
