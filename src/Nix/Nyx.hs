@@ -1,7 +1,11 @@
-{-# LANGUAGE DeriveAnyClass      #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE UnicodeSyntax       #-}
+{-# LANGUAGE DeriveAnyClass        #-}
+{-# LANGUAGE ImportQualifiedPost   #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE QuasiQuotes           #-}
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE TypeApplications      #-}
+{-# LANGUAGE UnicodeSyntax         #-}
 
 {-| nyx program to manage local configurations -}
 module Nix.Nyx
@@ -21,14 +25,23 @@ import Data.Aeson ( FromJSON(parseJSON), defaultOptions, eitherDecodeStrict',
                     fieldLabelModifier, genericParseJSON, withObject, (.:),
                     (.:?) )
 
+-- aeson-plus --------------------------
+
+import Data.Aeson.Error ( AesonError, AsAesonError(_AesonError),
+                          throwAsAesonError )
+
 -- base --------------------------------
 
-import Data.Foldable    ( Foldable )
-import Data.Function    ( flip )
-import Data.Functor     ( Functor )
-import Data.List        ( any, filter, maximum, unzip3 )
-import Data.Traversable ( traverse )
-import GHC.Generics     ( Generic )
+import Data.List qualified
+
+import Control.Applicative ( optional )
+import Data.Foldable       ( Foldable )
+import Data.Function       ( flip )
+import Data.Functor        ( Functor )
+import Data.List           ( any, filter, maximum, repeat, transpose, unzip3,
+                             zip, zipWith )
+import Data.Traversable    ( traverse )
+import GHC.Generics        ( Generic )
 
 -- containers --------------------------
 
@@ -44,20 +57,23 @@ import Control.DeepSeq ( NFData )
 
 -- fpath -------------------------------
 
+import FPath.Abs              ( Abs(AbsD, AbsF) )
 import FPath.AbsDir           ( AbsDir, absdir )
 import FPath.AbsFile          ( AbsFile, absfile )
 import FPath.AppendableFPath  ( AppendableFPath, AppendableFPathD,
                                 AppendableFPathF, (⫻) )
 import FPath.AsFilePath       ( AsFilePath, filepath )
 import FPath.Basename         ( basename )
-import FPath.Dir              ( DirAs )
+import FPath.Dir              ( Dir, DirAs )
+import FPath.Dirname          ( dirname )
 import FPath.DirType          ( DirType )
 import FPath.Error.FPathError ( AsFPathError(_FPathError) )
-import FPath.Parseable        ( parse )
+import FPath.File             ( File )
+import FPath.Parseable        ( parse, readM )
 import FPath.PathComponent    ( PathComponent )
 import FPath.RelDir           ( RelDir, reldir )
 import FPath.RelFile          ( RelFile, relfile )
-import FPath.ToDir            ( ToDir )
+import FPath.ToDir            ( ToDir(toDir) )
 import Text.Read              ( Read )
 
 -- lens --------------------------------
@@ -90,6 +106,7 @@ import MockIO.Log ( HasDoMock, MockIOClass, doMock, logResult, mkIOL, mkIOLME,
 
 import MockIO.Directory             ( lsdir' )
 import MockIO.File                  ( FExists(FExists), fexists )
+import MockIO.FStat                 ( stat' )
 import MockIO.Process               ( ꙫ )
 import MockIO.Process.MLCmdSpec     ( MLCmdSpec, ToMLCmdSpec, mock_value )
 import MockIO.Process.OutputDefault ( OutputDefault )
@@ -100,16 +117,23 @@ import MonadError.IO.Error ( throwUserError )
 
 -- monadio-plus ------------------------
 
-import MonadIO                       ( say )
+import MonadIO                       ( say, warn )
 import MonadIO.Base                  ( getArgs )
+import MonadIO.Cwd                   ( getCwd )
 import MonadIO.Error.CreateProcError ( AsCreateProcError(_CreateProcError) )
 import MonadIO.Error.ProcExitError   ( AsProcExitError(_ProcExitError) )
+import MonadIO.FPath                 ( pResolve, pResolveDir )
+import MonadIO.FStat                 ( isDir )
 import MonadIO.Process.ExitInfo      ( ExitInfo )
 import MonadIO.Process.ExitStatus    ( ExitStatus, evOK )
 import MonadIO.Process.MakeProc      ( MakeProc )
 import MonadIO.Process.OutputHandles ( OutputHandles )
 import MonadIO.Process.ToMaybeTexts  ( ToMaybeTexts )
 import MonadIO.User                  ( getUserName', homePath )
+
+-- more-unicode ------------------------
+
+import Data.MoreUnicode.Monad ( (⋙) )
 
 -- mtl ---------------------------------
 
@@ -122,8 +146,9 @@ import Natural ( length, replicate )
 
 -- optparse-applicative ----------------
 
-import Options.Applicative.Builder     ( argument, auto, command, info, metavar,
-                                         progDesc, subparser )
+import Options.Applicative.Builder     ( argument, auto, command, idm, info,
+                                         metavar, progDesc, strArgument,
+                                         subparser )
 import Options.Applicative.Help.Pretty ( align, empty, fillSep, text, vcat,
                                          (<$$>) )
 import Options.Applicative.Types       ( Parser )
@@ -144,13 +169,13 @@ import Safe ( maximumDef )
 
 import StdMain            ( stdMain )
 import StdMain.UsageError ( AsUsageError(_UsageError), UsageFPathIOError,
-                            UsageParseAesonFPPIOError, UsageParseFPProcIOError )
+                            UsageParseAesonFPPIOError, UsageParseFPProcIOError,
+                            throwUsage )
 
 -- text --------------------------------
 
 import Data.Text          ( concat, intercalate, pack, unpack )
 import Data.Text.Encoding ( encodeUtf8 )
-
 -- textual-plus ------------------------
 
 import TextualPlus qualified
@@ -164,14 +189,49 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError(_TextualParseEr
 
 import Nix.Paths qualified as Paths
 
-import Data.Aeson.Error ( AesonError, AsAesonError(_AesonError),
-                          throwAsAesonError )
-
-import Nix.Flake ( FlakePkgs, forMX86_64Pkg, forMX86_64Pkg_, forX86_64Pkg, pkg,
-                   ver, x86_64, x86_64_ )
+import Nix.Flake ( FlakePkg, FlakePkgs, flakeShow, forMX86_64Pkg,
+                   forMX86_64Pkg_, forX86_64Pkg, pkg, ver, x86_64, x86_64_ )
 import Nix.Types ( Arch, Pkg, Ver, pkgRE )
 
 --------------------------------------------------------------------------------
+
+class HomogenousTuple α where
+  type family TupleItem α
+  tupleToList ∷ α → [TupleItem α]
+
+instance HomogenousTuple (α,α) where
+  type instance TupleItem (α,α) = α
+  tupleToList (a0,a1) = [a0,a1]
+
+instance HomogenousTuple (α,α,α) where
+  type instance TupleItem (α,α,α) = α
+  tupleToList (a0,a1,a2) = [a0,a1,a2]
+
+------------------------------------------------------------
+
+{- Given a list of lines, each being a list of columns; pad out the columns
+   to provide an aligned display.
+
+   The columns are padded out according to the input `pads` argument.  Widths
+   are set according to the widest input column.  Columns for which no justify
+   value is provided are left unmolested.
+-}
+data Justify = JustifyLeft | JustifyRight
+
+-- provide fixed width args, and ignore args, and centrejustify args
+
+columnify ∷ [Justify] → [[𝕋]] → [[𝕋]]
+columnify pads zs =
+  let pad_t ∷ ℤ → 𝕋 → 𝕋
+      pad_t (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ⊕ t
+      pad_t (unNegate → (SignPlus, n)) t = t ⊕ replicate @𝕋 (n ⊖ length t) ' '
+
+      col_widths = transpose zs & each ⊧ (\ ys → maximumDef 0 $ length ⊳ ys)
+      xx JustifyLeft  = 1
+      xx JustifyRight = (-1)
+      col_widths' = (\(x,y) → fromIntegral y * xx x) ⊳ zip pads col_widths
+  in
+    (^.. each) ∘ zipWith pad_t (col_widths' ⊕ repeat 0) ⊳ zs
 
 ------------------------------------------------------------
 
@@ -190,25 +250,31 @@ userProfileNameRelDir = (fromList ∘ pure ∘ unProfileName) ⊳ userProfileNam
 
 ------------------------------------------------------------
 
-data Mode = ModeListPkgs | ModeListConfigs
+data Mode = ModeListPkgs (𝕄 𝕋)
+          | ModeListConfigs
 
 instance Printable Mode where
 
+{-
 instance Textual Mode where
-  textual = string "list-packages"    ⋫ pure ModeListPkgs
+  textual = string "list-packages"    ⋫ (ModeListPkgs ⊵ _)
           ∤ string "list-config-dirs" ⋫ pure ModeListConfigs
+-}
 
 -- XXX This should be a sub-command or similar
 
-data Options = Options { mode :: Mode
-                       }
+newtype Options = Options { mode :: Mode }
 
 ----------------------------------------
 
 {-| cmdline options parser -}
 parseOptions ∷ Parser Options
-parseOptions =
-  Options ⊳ subparser ( command "list-packages" (info (pure ModeListPkgs) (progDesc "list packages")) ⊕ command "list-config-dirs" (info (pure ModeListConfigs) (progDesc "list config directories")))
+parseOptions = Options ⊳ subparser
+  (ю [ command "list-packages"    (info (ModeListPkgs ⊳ optional (strArgument idm))
+                                 (progDesc "list packages"))
+     , command "list-config-dirs" (info (pure ModeListConfigs)
+                                 (progDesc "list config directories"))
+     ])
 
 --  argument readT (metavar "MODE")
 
@@ -217,6 +283,13 @@ parseOptions =
 {-| top dir to look for config flakes -}
 configTop ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒ μ AbsDir
 configTop = homePath [reldir|nix/|]
+
+----------------------------------------
+
+{-| top dir to look for config flakes -}
+configDefault ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
+                μ AbsDir
+configDefault = (⫻ [reldir|default/|]) ⊳ configTop
 
 ----------------------------------------
 
@@ -258,16 +331,14 @@ allConfigDirs ∷ (MonadIO μ,
              μ [AbsDir]
 allConfigDirs = do
   config_top  ← configTop
-  config_dirs ←
-    let has_flake ∷ (MonadIO μ,
-                     AsFPathError ε, AsIOError ε, Printable ε, MonadError ε μ,
-                     HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ) ⇒
-                    AbsDir → μ 𝔹
-        has_flake d  = do
-          (fs,_) ← lsdir' @_ @AbsFile Informational d NoMock
-          return $ any (\ (fn, _) → [relfile|flake.nix|] ≡ basename fn) fs
-    in  subdirs Informational config_top NoMock ≫ filterM has_flake
-  return $ config_dirs
+  let has_flake ∷ (MonadIO μ,
+                   AsFPathError ε, AsIOError ε, Printable ε, MonadError ε μ,
+                   HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ) ⇒
+                  AbsDir → μ 𝔹
+      has_flake d  = do
+        (fs,_) ← lsdir' @_ @AbsFile Informational d NoMock
+        return $ any (\ (fn, _) → [relfile|flake.nix|] ≡ basename fn) fs
+  subdirs Informational config_top NoMock ≫ filterM has_flake
 
 {-| list of config flakes -}
 
@@ -280,80 +351,23 @@ allConfigs = do
   let subdirs_ d = subdirs Informational d NoMock
       fexists_ f = (FExists ≡) ⊳ fexists Informational FExists f NoMock
   proto_flakes ← (⫻ [relfile|flake.nix|]) ⊳⊳ subdirs_ config_top
-  flakes ← (return proto_flakes) ≫ filterM fexists_
-  return $ flakes
-
-flakeShowTestInput ∷ 𝕋
-flakeShowTestInput =
-  concat [ "{ \"packages\": {"
-         , "    \"x86_64-linux\": {"
-
-         , "      \"binutils\": {"
-         , "        \"description\": \"Tools for manipulating binaries\","
-         , "        \"name\": \"binutils-wrapper-2.38\","
-         , "        \"type\": \"derivation\""
-         , "      },"
-
-         , "      \"get-iplayer-config\": {"
-         , "        \"name\": \"get-iplayer-config\","
-         , "        \"type\": \"derivation\""
-         , "      },"
-
-         , "      \"graph-easy\": {"
-         , "        \"description\": \"Render/convert graphs\","
-         , "        \"name\": \"perl5.34.1-Graph-Easy-0.76\","
-         , "        \"type\": \"derivation\""
-         , "      }"
-
-         , "    }"
-         , "  }"
-         , "}"
-         ]
+  (return proto_flakes) ≫ filterM fexists_
 
 ----------------------------------------
 
-{-| nix flake show #flake -}
-nix_flake_show ∷ ∀ ε δ α ξ ζ μ .
-                 (MonadIO μ, DirAs α,
-                  AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                  AsProcExitError ε, Printable ε, MonadError ε μ,
-                  OutputDefault ξ, ToMaybeTexts ξ, OutputHandles ζ ξ,
-                  ToMLCmdSpec (AbsFile, [𝕋], MLCmdSpec 𝕋 → MLCmdSpec 𝕋) ξ,
-                  MakeProc ζ,
-                  HasDoMock δ, MonadReader δ μ,
-                  MonadLog (Log MockIOClass) μ) ⇒
-                 α → μ (ExitInfo, ξ)
-nix_flake_show flake =
-  let mock_set ∷ MLCmdSpec 𝕋 → MLCmdSpec 𝕋
-      mock_set = let mock_val ∷ (ExitStatus, 𝕋) = (evOK, flakeShowTestInput)
-                 in  (& mock_value ⊢ mock_val)
-      args     = ["flake", "show", "--json", pack $ flake ⫥ filepath]
-  in  ꙫ (Paths.nix, args, mock_set)
 
-nix_flake_show' ∷ ∀ ε δ μ .
-                  (Printable ε, MonadError ε μ, AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                   AsProcExitError ε,  MonadIO μ, HasDoMock δ, MonadReader δ μ,
-                   MonadLog (Log MockIOClass) μ) ⇒
-                  AbsDir → μ (ExitInfo, 𝕋)
-nix_flake_show' = nix_flake_show
+namePkgVers ∷ FlakePkgs → [(𝕋,𝕋,𝕋)]
+namePkgVers pkgs =
+  let
+    pkgVer ∷ FlakePkg → (𝕋,𝕋)
+    pkgVer fp = (toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver)
 
-nix_flake_show'' ∷ ∀ ε δ μ .
-                   (Printable ε, MonadError ε μ, AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                    AsProcExitError ε,  MonadIO μ, HasDoMock δ, MonadReader δ μ,
-                    MonadLog (Log MockIOClass) μ) ⇒
-                   AbsDir → μ (𝔼 𝕊 FlakePkgs)
-nix_flake_show'' d = snd ⊳ nix_flake_show' d ≫ \ s → return $ eitherDecodeStrict' (encodeUtf8 s)
+    pfx ∷ α → (β,γ) → (α,β,γ)
+    pfx x (y,z) = (x,y,z)
+  in
+    Map.foldMapWithKey (\ p fp → [pfx (toText p) (pkgVer fp)]) $ pkgs ⊣ x86_64_
 
-nix_flake_show''' ∷ ∀ ε δ μ .
-                    (Printable ε, MonadError ε μ, AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                     AsProcExitError ε, AsAesonError ε,  MonadIO μ, HasDoMock δ, MonadReader δ μ,
-                     MonadLog (Log MockIOClass) μ) ⇒
-                    AbsDir → μ [(𝕋,𝕋,𝕋)]
-
-nix_flake_show''' d = nix_flake_show'' d ≫ \ case
-  𝕽 pkgs → return ∘ Map.foldMapWithKey (\ p fp → [(toText $ p, toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver)]) $ pkgs ⊣ x86_64_
-  𝕷 e    → throwAsAesonError e
-
+----------------------------------------
 
 natNeg ∷ ℕ → ℕ → ℕ
 natNeg x y = if x ≥ y then x - y else 0
@@ -367,34 +381,42 @@ unNegate ∷ ℤ → (NumSign,ℕ)
 unNegate n | n < 0     = (SignMinus, fromIntegral $ abs n)
            | otherwise = (SignPlus,  fromIntegral n)
 
-pad_t ∷ ℤ → 𝕋 → 𝕋
-pad_t (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ⊕ t
-pad_t (unNegate → (SignPlus, n)) t = t ⊕ replicate @𝕋 (n ⊖ length t) ' '
+padT ∷ ℤ → 𝕋 → 𝕋
+padT (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ⊕ t
+padT (unNegate → (SignPlus, n)) t = t ⊕ replicate @𝕋 (n ⊖ length t) ' '
 
-myMain ∷ ∀ ε . (HasCallStack,
-                AsUsageError ε, AsIOError ε, AsFPathError ε, AsCreateProcError ε, AsProcExitError ε, AsAesonError ε, Printable ε) ⇒
+{- | If f is a file type then if it is a dir on disc convert it else issue a
+     warning and use the base dir; if f is a dir, use that. -}
+
+flakeDirFromAbs ∷ (MonadIO μ,
+                   AsFPathError ε, AsIOError ε, AsUsageError ε, MonadError ε μ)⇒
+                  𝕋 → μ AbsDir
+flakeDirFromAbs f = do
+  pResolve f ≫ \ case
+    AbsD d → return d
+    AbsF f' → isDir f' ≫ \ case
+      𝕿 → return $ toDir f'
+      𝕱 → if basename f' ≡ [relfile|flake.nix|]
+           then return $ f' ⊣ dirname
+           else throwUsage $ [fmtT|cannot use '%T' as flake|] f
+
+myMain ∷ (HasCallStack, AsUsageError ε, AsIOError ε, AsFPathError ε,
+          AsCreateProcError ε, AsProcExitError ε, AsAesonError ε, Printable ε) ⇒
          DoMock → Options → LoggingT (Log MockIOClass) (ExceptT ε IO) Word8
 myMain do_mock opts = flip runReaderT do_mock $
   case mode opts of
-    ModeListPkgs -> do
-
+    ModeListPkgs f -> do
+      flake_dir ← case f of
+        𝕹   → configDefault
+        𝕵 f → flakeDirFromAbs f
+      say flake_dir
       allConfigs ≫ mapM_ say
 
-      xs ∷ [(𝕋,𝕋,𝕋)] ← nix_flake_show''' [absdir|/home/martyn/nix/default/|]
--- XXX turn this into a columnify function
+      xs ← flakeShow flake_dir ≫ either throwAsAesonError (return ∘ namePkgVers)
 
---  let pads = (PadLeft,PadLeft,PadRight)
-
-      let lengths ∷ (ℤ,ℤ,ℤ) =
-           (& _1 ⊧ fromIntegral) $
-           (& _2 ⊧ fromIntegral) $
-           (& _3 ⊧ (*(-1)) ∘ fromIntegral) $
-           (unzip3 xs) & each ⊧ (\ ys → maximumDef 0 $ length ⊳ ys)
-
-      let sprint_ppv zs =
-           let zip3TWith f (a,b,c) (x,y,z) = ((f a x), (f b y), (f c z))
-           in  intercalate "\t" $ (^.. each) $ (zip3TWith pad_t lengths zs)
-      forM_ xs (say ∘ sprint_ppv)
+      let xs' = tupleToList ⊳ xs
+      forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight] xs')
+            (say ∘ intercalate "\t")
       return 0
 
 {-| program main entry point -}

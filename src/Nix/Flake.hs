@@ -1,48 +1,105 @@
+{-# LANGUAGE UnicodeSyntax #-}
 module Nix.Flake
-  ( FlakePkgs, forX86_64Pkg, forMX86_64Pkg, forMX86_64Pkg_, pkg, ver, x86_64, x86_64_ )
-where
+  ( FlakePkg
+  , FlakePkgs
+  , flakeShow
+  , forMX86_64Pkg
+  , forMX86_64Pkg_
+  , forX86_64Pkg
+  , pkg
+  , ver
+  , x86_64
+  , x86_64_
+  ) where
 
-import Prelude  ( undefined )
+import Prelude ( undefined )
 
 import Base1T
 
 -- aeson -------------------------------
 
-import Data.Aeson.Types  as  AesonTypes
+import Data.Aeson ( FromJSON(parseJSON), defaultOptions, eitherDecodeStrict',
+                    fieldLabelModifier, genericParseJSON, withObject, (.:),
+                    (.:?) )
+
+import Data.Aeson.Types as AesonTypes
+
+-- aeson-plus --------------------------
+
+import Data.Aeson.Error ( AesonError, AsAesonError(_AesonError),
+                          throwAsAesonError )
 
 -- base --------------------------------
 
-import Data.Maybe    ( fromMaybe )
-import Data.Tuple    ( uncurry )
-import GHC.Generics  ( Generic )
+import Data.Maybe   ( fromMaybe )
+import Data.Tuple   ( uncurry )
+import GHC.Generics ( Generic )
 
 -- containers --------------------------
 
-import qualified Data.Map.Strict  as  Map
+import Data.Map.Strict qualified as Map
+
+-- fpath -------------------------------
+
+import FPath.AbsDir           ( AbsDir )
+import FPath.AsFilePath       ( AsFilePath, filepath )
+import FPath.Error.FPathError ( AsFPathError(_FPathError) )
 
 -- lens --------------------------------
 
-import Control.Lens.At      ( at )
-import Control.Lens.Getter  ( (^.) )
-import Control.Lens.Lens    ( Lens' )
+import Control.Lens.At     ( at )
+import Control.Lens.Getter ( (^.) )
+import Control.Lens.Lens   ( Lens' )
+
+-- log-plus ----------------------------
+
+import Log ( Log, logIO )
+
+-- logging-effect ----------------------
+
+import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational) )
+
+-- mockio-log --------------------------
+
+import MockIO.Log ( HasDoMock, MockIOClass, doMock, logResult, mkIOL, mkIOLME,
+                    mkIOLMER )
+
+-- mockio-plus -------------------------
+
+import MockIO.Process           ( ꙫ )
+import MockIO.Process.MLCmdSpec ( MLCmdSpec, ToMLCmdSpec, mock_value )
+
+-- monadio-plus ------------------------
+
+import MonadIO.Error.CreateProcError ( AsCreateProcError(_CreateProcError) )
+import MonadIO.Error.ProcExitError   ( AsProcExitError(_ProcExitError) )
+import MonadIO.Process.ExitStatus    ( ExitStatus, evOK )
 
 -- more-unicode ------------------------
 
-import Data.MoreUnicode.Lens  ( tindex )
+import Data.MoreUnicode.Lens ( tindex )
+
+-- mtl ---------------------------------
+
+import Control.Monad.Except ( throwError )
+import Control.Monad.Reader ( MonadReader, runReaderT )
 
 -- text --------------------------------
 
-import Data.Text  ( unpack )
+import Data.Text          ( concat, pack, unpack )
+import Data.Text.Encoding ( encodeUtf8 )
 
 -- textual-plus ------------------------
 
-import qualified TextualPlus
+import TextualPlus qualified
 
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Types  ( Arch, Pkg, Ver, pkgRE, x86_64Linux )
+import Nix.Paths qualified as Paths
+
+import Nix.Types ( Arch, Pkg, Ver, pkgRE, x86_64Linux )
 
 --------------------------------------------------------------------------------
 
@@ -54,10 +111,10 @@ customOptions =
 
 ------------------------------------------------------------
 
-data FlakePkg = FlakePkg { _description ∷ 𝕄 𝕋
-                         , _pkg         ∷ Pkg
-                         , _ver         ∷ 𝕄 Ver
-                         , _type        ∷ 𝕋
+data FlakePkg = FlakePkg { _description :: 𝕄 𝕋
+                         , _pkg         :: Pkg
+                         , _ver         :: 𝕄 Ver
+                         , _type        :: 𝕋
                          }
   deriving (Generic, Show)
 
@@ -78,7 +135,7 @@ instance FromJSON FlakePkg where
 
 ------------------------------------------------------------
 
-newtype FlakePkgs = FlakePkgs { _packages ∷ Map.Map Arch(Map.Map Pkg FlakePkg) }
+newtype FlakePkgs = FlakePkgs { _packages :: Map.Map Arch (Map.Map Pkg FlakePkg) }
   deriving (Generic, Show)
 
 instance FromJSON FlakePkgs where
@@ -141,5 +198,51 @@ forMX86_64Pkg fps f = case x86_64 fps of
     packages; unify unit returns -}
 forMX86_64Pkg_ ∷ Monad η ⇒ FlakePkgs → (Pkg → FlakePkg → η α) → η ()
 forMX86_64Pkg_ fps f = forMX86_64Pkg fps f ⪼ return ()
+
+----------------------------------------
+
+flakeShowTestInput ∷ 𝕋
+flakeShowTestInput =
+  concat [ "{ \"packages\": {"
+         , "    \"x86_64-linux\": {"
+
+         , "      \"binutils\": {"
+         , "        \"description\": \"Tools for manipulating binaries\","
+         , "        \"name\": \"binutils-wrapper-2.38\","
+         , "        \"type\": \"derivation\""
+         , "      },"
+
+         , "      \"get-iplayer-config\": {"
+         , "        \"name\": \"get-iplayer-config\","
+         , "        \"type\": \"derivation\""
+         , "      },"
+
+         , "      \"graph-easy\": {"
+         , "        \"description\": \"Render/convert graphs\","
+         , "        \"name\": \"perl5.34.1-Graph-Easy-0.76\","
+         , "        \"type\": \"derivation\""
+         , "      }"
+
+         , "    }"
+         , "  }"
+         , "}"
+         ]
+
+{-| nix flake show #flake -}
+flakeShow ∷ ∀ ε δ μ .
+            (MonadIO μ, HasDoMock δ, MonadReader δ μ,
+             AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+             AsProcExitError ε, AsAesonError ε, Printable ε,
+             MonadError ε μ,
+             MonadLog (Log MockIOClass) μ) ⇒
+            AbsDir → μ (𝔼 𝕊 FlakePkgs)
+flakeShow d = do
+  let mock_set ∷ MLCmdSpec 𝕋 → MLCmdSpec 𝕋
+      mock_set = let mock_val ∷ (ExitStatus, 𝕋) = (evOK, flakeShowTestInput)
+                 in  (& mock_value ⊢ mock_val)
+      args     = ["flake", "show", "--json", pack $ d ⫥ filepath]
+  (_,flake_show) ← ꙫ (Paths.nix, args, mock_set)
+
+  return $ eitherDecodeStrict' (encodeUtf8 flake_show)
 
 -- that's all, folks! ----------------------------------------------------------

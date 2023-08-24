@@ -1,4 +1,4 @@
-0.0.2.0 2023-
+0.0.2.0 2023-08-24
 ==================
 - profile-members can now also take an absolute dir path for a profile dir
 
