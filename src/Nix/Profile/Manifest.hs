@@ -1,113 +1,90 @@
+{-# LANGUAGE UnicodeSyntax #-}
 {-| work with nix `manifest.json` files -}
 
 module Nix.Profile.Manifest
-  ( Manifest, ManifestElement, elementsi, getNameVerPath, readManifest )
-where
+  ( attrPaths
+  , elementsi
+  , findPkg
+  , findPkg'
+  , findPkgs
+  , readManifest
+  , readManifestDir
+  ) where
 
 import Base1T
 
--- aeson -------------------------------
-
-import Data.Aeson  ( FromJSON, eitherDecodeFileStrict' )
-
 -- base --------------------------------
 
-import qualified  Data.List.NonEmpty  as  NonEmpty
-
-import Data.List     ( zip )
-import GHC.Generics  ( Generic )
+import Data.List  ( elemIndices, zip )
+import Data.Maybe ( catMaybes )
 
 -- fpath -------------------------------
 
-import FPath.AbsDir            ( AbsDir )
-import FPath.AsFilePath        ( filepath )
-import FPath.AbsFile           ( AbsFile )
-import FPath.AppendableFPath   ( (⫻) )
-import FPath.Dir               ( Dir( DirA, DirR ) )
-import FPath.Error.FPathError  ( AsFPathError )
-import FPath.Parseable         ( parseDir )
-import FPath.RelDir            ( reldir )
-import FPath.RelFile           ( relfile )
+import FPath.AbsDir           ( AbsDir )
+import FPath.AbsFile          ( AbsFile )
+import FPath.AppendableFPath  ( (⫻) )
+import FPath.Error.FPathError ( AsFPathError )
+import FPath.RelFile          ( relfile )
+
+-- lens --------------------------------
+
+import Control.Lens.Getter ( view )
+import Control.Lens.Tuple  ( _1 )
 
 -- log-plus ----------------------------
 
-import Log  ( Log )
+import Log ( Log )
 
 -- logging-effect ----------------------
 
-import Control.Monad.Log  ( MonadLog, Severity( Informational ) )
+import Control.Monad.Log ( MonadLog, Severity(Informational) )
 
 -- mockio ------------------------------
 
-import MockIO.DoMock  ( DoMock( NoMock ), HasDoMock )
+import MockIO.DoMock ( DoMock(NoMock), HasDoMock )
 
 -- mockio-log --------------------------
 
-import MockIO.IOClass  ( HasIOClass )
+import MockIO.IOClass ( HasIOClass )
 
 -- mockio-plus -------------------------
 
-import MockIO.File  ( fexists )
+import MockIO.File ( fexists )
 
 -- monaderror-io -----------------------
 
-import MonadError.IO.Error  ( throwUserError )
+import MonadError.IO.Error ( throwUserError )
 
 -- monadio-plus ------------------------
 
-import MonadIO.FStat  ( FExists( FExists, NoFExists ) )
-import MonadIO.User   ( homePath )
+import MonadIO.FStat ( FExists(FExists, NoFExists) )
 
 -- more-unicode ------------------------
 
-import Data.MoreUnicode.Monad  ( (⋘) )
+import Data.MoreUnicode.Monad ( (⋘) )
+
+-- mtl ---------------------------------
+
+import Control.Monad.Reader ( MonadReader )
 
 -- textual-plus ------------------------
 
-import TextualPlus                         ( tparse )
-import TextualPlus.Error.TextualParseError ( TextualParseError )
+import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Profile.AttrPath   ( apPkg )
-import Nix.Profile.StorePath  ( spPkgVerPath )
-import Nix.Types              ( Pkg, Ver )
+import Nix.Error            ( AsNixDuplicatePkgError, AsNixError,
+                              throwAsNixDuplicatePkgError,
+                              throwAsNixErrorDuplicatePkg )
+import Nix.Profile          ( nixProfileAbsDir )
+import Nix.Profile.AttrPath ( AttrPath )
+import Nix.Types            ( Pkg )
+import Nix.Types.Manifest   ( Manifest, ManifestElement, attrPath, elements,
+                              getNameVerPath, location, readManifestFile )
 
 --------------------------------------------------------------------------------
-
-{-| An individual element of a profile manifest -}
-data ManifestElement = ManifestElement { active      ∷ 𝔹
-                                       , priority    ∷ ℕ
-                                       , storePaths  ∷ NonEmpty 𝕊
-                                       , attrPath    ∷ 𝕄 𝕊
-                                       , originalURL ∷ 𝕄 𝕊
-                                       , url         ∷ 𝕄 𝕊
-                                       }
-  deriving (Generic, Show)
-
-instance FromJSON ManifestElement
-
-------------------------------------------------------------
-
-{-| A profile manifest, read from a `manifest.json` file -}
-data Manifest = Manifest { version ∷ ℤ, elements ∷ [ManifestElement] }
-  deriving (Generic, Show)
-
-instance FromJSON Manifest
-
-------------------------------------------------------------
-
-nixProfile ∷ (AsIOError ε,AsFPathError ε,MonadError ε μ,MonadIO μ) ⇒ μ AbsDir
-nixProfile = homePath [reldir|.nix-profile/|]
-
-----------------------------------------
-
-nixProfiles ∷ (AsIOError ε,AsFPathError ε,MonadError ε μ,MonadIO μ) ⇒ μ AbsDir
-nixProfiles = homePath [reldir|.nix-profiles/|]
-
-------------------------------------------------------------
 
 {-| Given a profile name, return the manifest filepath.  If the name is the
     empty string, return the default profile (~/.nix-profile) -}
@@ -115,13 +92,9 @@ profileManifest ∷ ∀ ε τ ω μ .
                   (AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
                    HasIOClass ω, HasDoMock ω, Default ω, MonadLog (Log ω) μ,
                    Printable τ, MonadIO μ) ⇒
-                  τ → μ AbsFile
-profileManifest (toText → d) = do
-  dir ← if d ≡ ""
-        then nixProfile
-        else parseDir d ≫ \ case
-             DirR d' → nixProfiles ⊲ (⫻ d')
-             DirA d' → return d'
+                  (𝕄 τ) → μ AbsFile
+profileManifest (fmap toText → d) = do
+  dir ← nixProfileAbsDir d
 
   fexists Informational FExists dir NoMock ≫ \ case
     NoFExists → throwUserError $ [fmtT|No such profile dir '%T'|] dir
@@ -135,17 +108,25 @@ profileManifest (toText → d) = do
 
 ----------------------------------------
 
+{-| Given a dir; read the @manifest.json@ profile file from that dir. -}
+readManifestDir ∷ ∀ ε ω μ .
+               (MonadIO μ, MonadReader DoMock μ,
+                AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
+                HasIOClass ω, HasDoMock ω, Default ω, MonadLog (Log ω) μ) ⇒
+               Severity → AbsDir → μ (𝔼 𝕊 Manifest)
+readManifestDir sev = readManifestFile sev ∘ (⫻ [relfile|manifest.json|])
+
 {-| Given a name (e.g., "default", or "desktop"; or the empty string meaning the
     default profile from ~/.nix-profile/; read the `manifest.json` file for that
     profile.
  -}
 readManifest ∷ ∀ ε τ ω μ .
-               (AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
+               (MonadIO μ, MonadReader DoMock μ,
+                AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
                 HasIOClass ω, HasDoMock ω, Default ω, MonadLog (Log ω) μ,
-                Printable τ, MonadIO μ) ⇒
-               τ → μ (Either 𝕊 Manifest)
-readManifest =
-  liftIO ∘ eitherDecodeFileStrict' ∘ (⫥ filepath) ⋘ profileManifest
+                Printable τ) ⇒
+               Severity → 𝕄 τ → μ (𝔼 𝕊 Manifest)
+readManifest sev = readManifestFile sev ⋘ profileManifest
 
 ----------------------------------------
 
@@ -155,13 +136,31 @@ elementsi m = zip [0..] (elements m)
 
 ----------------------------------------
 
-{-| extract the name, version & path from @ManifestElement@ -}
-getNameVerPath ∷ (MonadError TextualParseError η) ⇒
-                 ManifestElement → η (Pkg, 𝕄 Ver, AbsDir)
-getNameVerPath e = do
-  (pkgs,ver,path) ← spPkgVerPath ⊳ tparse (NonEmpty.head $ storePaths e)
-  case attrPath e of
-    𝕵 ap → (,ver,path) ⊳ apPkg ap
-    𝕹    → return (pkgs,ver,path)
+findPkgs ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η)⇒
+           Pkg → Manifest → η [ℕ]
+findPkgs p m = do
+  pkgs ← sequence [ view _1 ⊳ getNameVerPath e | e ← elements m ]
+  return $ fromIntegral ⊳ elemIndices p pkgs
+
+findPkg_ ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η)⇒
+           (Pkg → AbsFile → η (𝕄 ℕ)) → Pkg → Manifest → η (𝕄 ℕ)
+findPkg_ throw p m = do
+  findPkgs p m ≫ \ case
+    []   → return 𝕹
+    [p'] → return ∘ 𝕵 $ p'
+    _    → throw p (location m)
+
+findPkg ∷ ∀ ε η.(AsNixDuplicatePkgError ε,AsTextualParseError ε,MonadError ε η)⇒
+          Pkg → Manifest → η (𝕄 ℕ)
+findPkg = findPkg_ throwAsNixDuplicatePkgError
+
+findPkg' ∷ (AsNixError ε, AsTextualParseError ε, MonadError ε η) ⇒
+           Pkg → Manifest → η (𝕄 ℕ)
+findPkg' = findPkg_ throwAsNixErrorDuplicatePkg
+
+----------------------------------------
+
+attrPaths ∷ Manifest → [AttrPath]
+attrPaths m = catMaybes [ attrPath e | e ← elements m ]
 
 -- that's all, folks! ----------------------------------------------------------

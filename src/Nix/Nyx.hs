@@ -1,4 +1,6 @@
-{-# LANGUAGE DeriveAnyClass        #-}
+-- add Handle for default profile (~/.nix-profile)
+-- add nix-install, nix-search equivs
+
 {-# LANGUAGE ImportQualifiedPost   #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -14,34 +16,19 @@ module Nix.Nyx
 
 import Base1T
 
-import Debug.Trace ( trace, traceShow )
-import Prelude     ( Int, Integral, Num, (*) )
-
-import Natural qualified
-
--- aeson -------------------------------
-
-import Data.Aeson ( FromJSON(parseJSON), defaultOptions, eitherDecodeStrict',
-                    fieldLabelModifier, genericParseJSON, withObject, (.:),
-                    (.:?) )
+import Prelude ( (*) )
 
 -- aeson-plus --------------------------
 
-import Data.Aeson.Error ( AesonError, AsAesonError(_AesonError),
-                          throwAsAesonError )
+import Data.Aeson.Error ( AsAesonError )
 
 -- base --------------------------------
 
-import Data.List qualified
-
 import Control.Applicative ( optional )
-import Data.Foldable       ( Foldable )
 import Data.Function       ( flip )
 import Data.Functor        ( Functor )
-import Data.List           ( any, filter, maximum, repeat, transpose, unzip3,
-                             zip, zipWith )
-import Data.Traversable    ( traverse )
-import GHC.Generics        ( Generic )
+import Data.List           ( any, intersect, repeat, transpose, zip, zipWith )
+import GHC.Exts            ( IsString(fromString) )
 
 -- containers --------------------------
 
@@ -49,44 +36,31 @@ import Data.Map.Strict qualified as Map
 
 -- data-textual ------------------------
 
-import Data.Textual ( Parsed(Malformed, Parsed), Textual(textual) )
-
--- deepseq -----------------------------
-
-import Control.DeepSeq ( NFData )
+import Data.Textual ( Textual(textual) )
 
 -- fpath -------------------------------
 
 import FPath.Abs              ( Abs(AbsD, AbsF) )
-import FPath.AbsDir           ( AbsDir, absdir )
-import FPath.AbsFile          ( AbsFile, absfile )
-import FPath.AppendableFPath  ( AppendableFPath, AppendableFPathD,
-                                AppendableFPathF, (⫻) )
-import FPath.AsFilePath       ( AsFilePath, filepath )
+import FPath.AbsDir           ( AbsDir )
+import FPath.AbsFile          ( AbsFile )
+import FPath.AppendableFPath  ( (⫻) )
 import FPath.Basename         ( basename )
-import FPath.Dir              ( Dir, DirAs )
 import FPath.Dirname          ( dirname )
-import FPath.DirType          ( DirType )
-import FPath.Error.FPathError ( AsFPathError(_FPathError) )
-import FPath.File             ( File )
-import FPath.Parseable        ( parse, readM )
+import FPath.Error.FPathError ( AsFPathError )
+import FPath.Parseable        ( parse )
 import FPath.PathComponent    ( PathComponent )
-import FPath.RelDir           ( RelDir, reldir )
-import FPath.RelFile          ( RelFile, relfile )
+import FPath.RelDir           ( reldir )
+import FPath.RelFile          ( relfile )
 import FPath.ToDir            ( ToDir(toDir) )
-import Text.Read              ( Read )
 
 -- lens --------------------------------
 
-import Control.Lens.Each   ( each )
-import Control.Lens.Fold   ( (^..) )
-import Control.Lens.Getter ( Getting, view )
-import Control.Lens.Setter ( over )
-import Control.Lens.Tuple  ( _1, _2, _3 )
+import Control.Lens.Each ( each )
+import Control.Lens.Fold ( (^..) )
 
 -- log-plus ----------------------------
 
-import Log ( Log, logIO )
+import Log ( Log )
 
 -- logging-effect ----------------------
 
@@ -95,21 +69,16 @@ import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational) )
 -- mockio ------------------------------
 
 import MockIO.DoMock  ( DoMock(NoMock) )
-import MockIO.IOClass ( HasIOClass, IOClass(IORead, IOWrite), ioClass )
+import MockIO.IOClass ( HasIOClass )
 
 -- mockio-log --------------------------
 
-import MockIO.Log ( HasDoMock, MockIOClass, doMock, logResult, mkIOL, mkIOLME,
-                    mkIOLMER )
+import MockIO.Log ( HasDoMock, MockIOClass )
 
 -- mockio-plus -------------------------
 
-import MockIO.Directory             ( lsdir' )
-import MockIO.File                  ( FExists(FExists), fexists )
-import MockIO.FStat                 ( stat' )
-import MockIO.Process               ( ꙫ )
-import MockIO.Process.MLCmdSpec     ( MLCmdSpec, ToMLCmdSpec, mock_value )
-import MockIO.Process.OutputDefault ( OutputDefault )
+import MockIO.Directory ( lsdir' )
+import MockIO.Process   ( ꙩ )
 
 -- monaderror-io -----------------------
 
@@ -119,26 +88,15 @@ import MonadError.IO.Error ( throwUserError )
 
 import MonadIO                       ( say, warn )
 import MonadIO.Base                  ( getArgs )
-import MonadIO.Cwd                   ( getCwd )
-import MonadIO.Error.CreateProcError ( AsCreateProcError(_CreateProcError) )
-import MonadIO.Error.ProcExitError   ( AsProcExitError(_ProcExitError) )
-import MonadIO.FPath                 ( pResolve, pResolveDir )
+import MonadIO.Error.CreateProcError ( AsCreateProcError )
+import MonadIO.Error.ProcExitError   ( AsProcExitError )
+import MonadIO.FPath                 ( pResolve )
 import MonadIO.FStat                 ( isDir )
-import MonadIO.Process.ExitInfo      ( ExitInfo )
-import MonadIO.Process.ExitStatus    ( ExitStatus, evOK )
-import MonadIO.Process.MakeProc      ( MakeProc )
-import MonadIO.Process.OutputHandles ( OutputHandles )
-import MonadIO.Process.ToMaybeTexts  ( ToMaybeTexts )
-import MonadIO.User                  ( getUserName', homePath )
-
--- more-unicode ------------------------
-
-import Data.MoreUnicode.Monad ( (⋙) )
+import MonadIO.User                  ( homePath )
 
 -- mtl ---------------------------------
 
-import Control.Monad.Except ( throwError )
-import Control.Monad.Reader ( MonadReader, runReaderT )
+import Control.Monad.Reader ( MonadReader, ReaderT, runReaderT )
 
 -- natural -----------------------------
 
@@ -146,20 +104,11 @@ import Natural ( length, replicate )
 
 -- optparse-applicative ----------------
 
-import Options.Applicative.Builder     ( argument, auto, command, idm, info,
-                                         metavar, progDesc, strArgument,
-                                         subparser )
-import Options.Applicative.Help.Pretty ( align, empty, fillSep, text, vcat,
-                                         (<$$>) )
+import Options.Applicative.Builder     ( command, flag', help, info, long,
+                                         progDesc, short, strArgument,
+                                         strOption, subparser )
+import Options.Applicative.Help.Pretty ( empty, vcat )
 import Options.Applicative.Types       ( Parser )
-
--- optparse-plus -----------------------
-
-import OptParsePlus ( readT, toDocTs, (⊞) )
-
--- parsers -----------------------------
-
-import Text.Parser.Char ( string )
 
 -- safe --------------------------------
 
@@ -168,20 +117,15 @@ import Safe ( maximumDef )
 -- stdmain -----------------------------
 
 import StdMain            ( stdMain )
-import StdMain.UsageError ( AsUsageError(_UsageError), UsageFPathIOError,
-                            UsageParseAesonFPPIOError, UsageParseFPProcIOError,
-                            throwUsage )
+import StdMain.UsageError ( AsUsageError, throwUsage )
 
 -- text --------------------------------
 
-import Data.Text          ( concat, intercalate, pack, unpack )
-import Data.Text.Encoding ( encodeUtf8 )
+import Data.Text ( intercalate, unpack )
+
 -- textual-plus ------------------------
 
-import TextualPlus qualified
-
-import TextualPlus.Error.TextualParseError ( AsTextualParseError(_TextualParseError),
-                                             TextualParseError )
+import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 
 ------------------------------------------------------------
 --                     local imports                      --
@@ -189,9 +133,12 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError(_TextualParseEr
 
 import Nix.Paths qualified as Paths
 
-import Nix.Flake ( FlakePkg, FlakePkgs, flakeShow, forMX86_64Pkg,
-                   forMX86_64Pkg_, forX86_64Pkg, pkg, ver, x86_64, x86_64_ )
-import Nix.Types ( Arch, Pkg, Ver, pkgRE )
+import Nix.Error            ( AsNixError, NixProgramError )
+import Nix.Flake            ( FlakePkg, FlakePkgs, flakeShow, flakeShow', pkg,
+                              pkgFindNames', ver, x86_64_ )
+import Nix.Profile          ( nixProfileAbsDir )
+import Nix.Profile.Manifest ( attrPaths, readManifestDir )
+import Nix.Types.Manifest   ( Manifest )
 
 --------------------------------------------------------------------------------
 
@@ -235,54 +182,63 @@ columnify pads zs =
 
 ------------------------------------------------------------
 
-newtype ProfileName = ProfileName { unProfileName :: PathComponent }
-
-userProfileName ∷ ∀ ε μ .
-              (MonadIO μ,AsIOError ε,AsFPathError ε,Printable ε,MonadError ε μ)⇒
-              μ ProfileName
-userProfileName = ProfileName ⊳ (getUserName' ≫ parse)
-
-userProfileNameRelDir ∷ ∀ ε μ .
-                        (MonadIO μ,
-                         AsIOError ε,AsFPathError ε,Printable ε,MonadError ε μ)⇒
-                        μ RelDir
-userProfileNameRelDir = (fromList ∘ pure ∘ unProfileName) ⊳ userProfileName
-
-------------------------------------------------------------
-
 data Mode = ModeListPkgs (𝕄 𝕋)
           | ModeListConfigs
-
-instance Printable Mode where
-
-{-
-instance Textual Mode where
-  textual = string "list-packages"    ⋫ (ModeListPkgs ⊵ _)
-          ∤ string "list-config-dirs" ⋫ pure ModeListConfigs
--}
-
--- XXX This should be a sub-command or similar
+          | ModeInstall (𝔼 AllPackages [𝕋]) (𝕄 𝕋)
 
 newtype Options = Options { mode :: Mode }
 
 ----------------------------------------
 
+{-| typed user option; `AllPackages` means to operate on all packages in a
+    flake; `NotAllPackages` is typically the default (user didn't use -a) -}
+data AllPackages = AllPackages {- NotAllPackages | -}
+
 {-| cmdline options parser -}
 parseOptions ∷ Parser Options
-parseOptions = Options ⊳ subparser
-  (ю [ command "list-packages"    (info (ModeListPkgs ⊳ optional (strArgument idm))
-                                 (progDesc "list packages"))
-     , command "list-config-dirs" (info (pure ModeListConfigs)
-                                 (progDesc "list config directories"))
-     ])
+parseOptions =
+  let
+    config_option = strOption (ю [ short 'c', long "config"
+                                 , help "select config to use" ])
+    install_parser ∷ Parser Mode
+    install_parser =
+      ModeInstall ⊳ (  (𝕽 ⊳ some (strArgument (help "package")))
+                     ∤ (𝕷 ⊳ flag' AllPackages (ю [ short 'a'
+                                                  , help "all packages" ])))
+                  ⊵ optional config_option
 
---  argument readT (metavar "MODE")
+  in
+    Options ⊳ subparser
+    (ю [ command "list-packages"    (info (ModeListPkgs ⊳
+                                           optional config_option)
+                                     (progDesc "list packages"))
+       , command "list-config-dirs" (info (pure ModeListConfigs)
+                                     (progDesc "list config directories"))
+       , command "install"          (info install_parser
+                                     (progDesc "install one or more packages")
+                                    )
+       ])
 
 ------------------------------------------------------------
 
 {-| top dir to look for config flakes -}
-configTop ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒ μ AbsDir
+configTop ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
+            μ AbsDir
 configTop = homePath [reldir|nix/|]
+
+----------------------------------------
+
+newtype ConfigName = ConfigName { unConfigName :: PathComponent }
+  deriving (Printable)
+
+instance Textual ConfigName where
+  textual = ConfigName ⊳ textual
+
+----------------------------------------
+
+configDir ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
+            ConfigName → μ AbsDir
+configDir p = (⫻ fromList [unConfigName p]) ⊳ configTop
 
 ----------------------------------------
 
@@ -290,27 +246,6 @@ configTop = homePath [reldir|nix/|]
 configDefault ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
                 μ AbsDir
 configDefault = (⫻ [reldir|default/|]) ⊳ configTop
-
-----------------------------------------
-
-{-| top dir where nix profiles are stored -}
-profilesTop ∷ (MonadIO μ,AsIOError ε,AsFPathError ε,Printable ε,MonadError ε μ)⇒
-              μ AbsDir
-profilesTop =
-  ([absdir|/nix/var/nix/profiles/per-user/|] ⫻) ⊳ userProfileNameRelDir
-
-----------------------------------------
-
-{-| append a profile name to a dir to find a profile dir -}
-profileAppend ∷ AbsDir → ProfileName → AbsDir
-profileAppend top = (top ⫻) ∘ fromList ∘ pure ∘ unProfileName
-
-----------------------------------------
-
-{-| find a profile dir from a profile name, assuming the use of `profilesTop` -}
-profileDir ∷ (MonadIO μ,AsIOError ε,AsFPathError ε,Printable ε,MonadError ε μ)⇒
-             ProfileName → μ AbsDir
-profileDir = (profilesTop ⊲) ∘ flip profileAppend
 
 ----------------------------------------
 
@@ -322,6 +257,8 @@ subdirs ∷ ∀ ε ω μ .
            HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ) ⇒
           Severity → AbsDir → DoMock → μ [AbsDir]
 subdirs sv d k = fst ⊳⊳ snd ⊳ lsdir' @_ @AbsFile sv d k
+
+----------------------------------------
 
 {-| list of config directories; that is, dirs in `configTop` that contain a
     @flake.nix@ -}
@@ -340,21 +277,7 @@ allConfigDirs = do
         return $ any (\ (fn, _) → [relfile|flake.nix|] ≡ basename fn) fs
   subdirs Informational config_top NoMock ≫ filterM has_flake
 
-{-| list of config flakes -}
-
-allConfigs ∷ (MonadIO μ,
-              HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ,
-              AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ) ⇒
-             μ [AbsFile]
-allConfigs = do
-  config_top  ← configTop
-  let subdirs_ d = subdirs Informational d NoMock
-      fexists_ f = (FExists ≡) ⊳ fexists Informational FExists f NoMock
-  proto_flakes ← (⫻ [relfile|flake.nix|]) ⊳⊳ subdirs_ config_top
-  (return proto_flakes) ≫ filterM fexists_
-
 ----------------------------------------
-
 
 namePkgVers ∷ FlakePkgs → [(𝕋,𝕋,𝕋)]
 namePkgVers pkgs =
@@ -381,54 +304,192 @@ unNegate ∷ ℤ → (NumSign,ℕ)
 unNegate n | n < 0     = (SignMinus, fromIntegral $ abs n)
            | otherwise = (SignPlus,  fromIntegral n)
 
-padT ∷ ℤ → 𝕋 → 𝕋
-padT (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ⊕ t
-padT (unNegate → (SignPlus, n)) t = t ⊕ replicate @𝕋 (n ⊖ length t) ' '
+----------------------------------------
 
 {- | If f is a file type then if it is a dir on disc convert it else issue a
      warning and use the base dir; if f is a dir, use that. -}
 
-flakeDirFromAbs ∷ (MonadIO μ,
-                   AsFPathError ε, AsIOError ε, AsUsageError ε, MonadError ε μ)⇒
-                  𝕋 → μ AbsDir
-flakeDirFromAbs f = do
+configDirFromAbs ∷ (MonadIO μ, Printable ε,
+                    AsFPathError ε, AsIOError ε, MonadError ε μ)⇒
+                   𝕋 → μ AbsDir
+configDirFromAbs f = do
   pResolve f ≫ \ case
     AbsD d → return d
     AbsF f' → isDir f' ≫ \ case
       𝕿 → return $ toDir f'
       𝕱 → if basename f' ≡ [relfile|flake.nix|]
-           then return $ f' ⊣ dirname
-           else throwUsage $ [fmtT|cannot use '%T' as flake|] f
+          then return $ f' ⊣ dirname
+          else parse @PathComponent f ≫ configDir ∘ ConfigName
 
-myMain ∷ (HasCallStack, AsUsageError ε, AsIOError ε, AsFPathError ε,
-          AsCreateProcError ε, AsProcExitError ε, AsAesonError ε, Printable ε) ⇒
+----------------------------------------
+
+nixDo ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
+                   AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                   AsProcExitError ε, Printable ε,
+                   MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
+        [𝕋] → μ ()
+nixDo args = snd ⊳ ꙩ (Paths.nix, args)
+
+----------------------------------------
+
+mkTargets ∷ AbsDir → [𝕋] → [𝕋]
+mkTargets config_dir attr_paths = [fmt|%T#%t|] config_dir ⊳ attr_paths
+
+----------------------------------------
+
+nixBuild ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
+                      AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                      AsProcExitError ε, Printable ε, MonadError ε μ,
+                      MonadLog (Log MockIOClass) μ) ⇒
+           AbsDir → [𝕋] → μ ()
+nixBuild config_dir attr_paths = do
+  warn $ [fmtT|building: (%T) %L|] config_dir attr_paths
+  let targets = mkTargets config_dir attr_paths
+  nixDo $ [ "build", "--log-format", "bar-with-logs", "--no-link" ] ⊕ targets
+
+----------------------------------------
+
+nixProfileRemove ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
+                              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                              AsProcExitError ε, Printable ε, MonadError ε μ,
+                              MonadLog (Log MockIOClass) μ) ⇒
+                   AbsDir → [𝕋] → μ ()
+nixProfileRemove profile pkgs = do
+  warn $ [fmtT|removing: (%T) %L|] profile pkgs
+  nixDo $ ["profile", "remove", "--verbose", "--profile", toText profile] ⊕ pkgs
+
+----------------------------------------
+
+nixProfileInstall ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
+                              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                              AsProcExitError ε, Printable ε, MonadError ε μ,
+                              MonadLog (Log MockIOClass) μ) ⇒
+                   AbsDir → AbsDir → [𝕋] → μ ()
+nixProfileInstall config_dir profile attr_paths = do
+  warn $ [fmtT|installing: (%T→%T) %L|] config_dir profile attr_paths
+  let targets = mkTargets config_dir attr_paths
+  nixDo $ [ "profile", "install", "--profile", toText profile ] ⊕ targets
+
+----------------------------------------
+
+fromText ∷ IsString α ⇒ 𝕋 → α
+fromText = fromString ∘ unpack
+
+----------------------------------------
+
+fromTexts ∷ (Functor ψ, IsString α) ⇒ ψ 𝕋 → ψ α
+fromTexts = (fromText ⊳)
+
+----------------------------------------
+
+noMock ∷ ∀ η α . ReaderT DoMock η α → η α
+noMock = flip runReaderT NoMock
+
+----------------------------------------
+
+partitionMaybes ∷ [(α, 𝕄 β)] → ([α], [(α,β)])
+partitionMaybes = go ([],[])
+  where go (naes,yaes) []             = (naes, yaes)
+        go (naes,yaes) ((a,𝕹) : xs)   = go (a:naes, yaes) xs
+        go (naes,yaes) ((a,𝕵 b) : xs) = go (naes, (a,b) : yaes) xs
+
+----------------------------------------
+
+checkPackages ∷ ∀ ε α μ .
+                (MonadIO μ, MonadLog (Log MockIOClass) μ,
+                 AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
+                 AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
+                 Printable ε, MonadError ε μ) ⇒
+                (AbsDir → AbsDir → [𝕋] → μ α) → Maybe 𝕋 → [𝕋] → μ α
+checkPackages f c pkgs = do
+  config_dir     ← maybe configDefault configDirFromAbs c
+  target_profile ← nixProfileAbsDir c
+
+  flkPkgs ∷ FlakePkgs ← flakeShow' config_dir
+  say flkPkgs
+
+  partitionMaybes ⊳ pkgFindNames' flkPkgs (fromTexts pkgs) ≫ \ case
+    (missing:[],_) →
+      throwUsage $ [fmtT|package not found: %T|] missing
+    (missing@(_:_:_),_) →
+      throwUsage $ [fmtT|packages not found: %L|] missing
+
+    ([],fmap snd → attr_paths) → f config_dir target_profile attr_paths
+
+
+----------------------------------------
+
+mainInstall ∷ ∀ ε δ μ .
+              (MonadIO μ, AsProcExitError ε, AsCreateProcError ε,
+               AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
+               HasDoMock δ, MonadReader δ μ, MonadLog (Log MockIOClass) μ) ⇒
+              AbsDir → AbsDir → [𝕋] → μ Word8
+
+mainInstall config_dir target_profile attr_paths = do
+  -- test build all the packages, before we make any destructive changes to
+  -- the profile
+  nixBuild config_dir attr_paths
+
+  profile_manifest ∷ Manifest ← noMock $ do
+    m ← readManifestDir Informational target_profile
+    either throwUserError return m
+
+  -- pre-remove anything found in the manifest; we're replacing/updating,
+  -- rather than adding
+
+  -- we do it this way because nix profile upgrade doesn't work with
+  -- our flakes; e.g.,
+  {- $ nix profile upgrade --profile /nix/var/nix/profiles/per-user/martyn/haskell /home/martyn/nix/haskell#packages.x86_64-linux.ghc
+     warning: '/home/martyn/nix/haskell#packages.x86_64-linux.ghc' does not match any packages
+  -}
+  -- true even if we use, e.g.,
+  -- git+file:///home/martyn/nix/haskell#packages.x86_64-linux.ghc
+  -- cited by nix profile list
+
+  -- nix profile install adds a new package without removing the older one
+
+  let removals = let text_paths = toText ⊳ attrPaths profile_manifest
+                 in  text_paths `intersect` attr_paths
+  nixProfileRemove target_profile removals
+
+  nixProfileInstall config_dir target_profile attr_paths
+  return 0
+
+----------------------------------------
+
+{-| List all the packages from a given flake -}
+mainListPkgs ∷ (MonadIO μ, MonadReader δ μ, HasDoMock δ,
+                AsAesonError ε, AsProcExitError ε, AsCreateProcError ε,
+                AsFPathError ε, AsIOError ε{- , AsUsageError ε -}, Printable ε,
+                MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
+               𝕄 𝕋 → μ Word8
+mainListPkgs f = do
+  config_dir ← maybe configDefault configDirFromAbs f
+  xs ∷ [(𝕋,𝕋,𝕋)] ← namePkgVers ⊳ flakeShow config_dir
+  let xs' = tupleToList ⊳ xs
+  forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight] xs')
+        (say ∘ intercalate "\t")
+  return 0
+
+----------------------------------------
+
+myMain ∷ (HasCallStack, AsNixError ε, AsIOError ε,AsFPathError ε,AsAesonError ε,
+          AsCreateProcError ε, AsProcExitError ε, AsTextualParseError ε,
+          AsUsageError ε, Printable ε) ⇒
          DoMock → Options → LoggingT (Log MockIOClass) (ExceptT ε IO) Word8
 myMain do_mock opts = flip runReaderT do_mock $
   case mode opts of
-    ModeListPkgs f -> do
-      flake_dir ← case f of
-        𝕹   → configDefault
-        𝕵 f → flakeDirFromAbs f
-      say flake_dir
-      allConfigs ≫ mapM_ say
-
-      xs ← flakeShow flake_dir ≫ either throwAsAesonError (return ∘ namePkgVers)
-
-      let xs' = tupleToList ⊳ xs
-      forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight] xs')
-            (say ∘ intercalate "\t")
-      return 0
+    ModeListPkgs f   → mainListPkgs f
+    ModeInstall ps c → checkPackages mainInstall c (either (const []) id ps)
+    ModeListConfigs  → allConfigDirs ≫ mapM_ say ⪼ return 0
 
 {-| program main entry point -}
 main ∷ MonadIO μ ⇒ μ ()
 main = do
 -- ?add logging options
 -- show all configs (as option)
-  let progDesc =
-        -- the values of list_packages, etc., will be wrapped as necessary
-        let list_packages = fillSep [ toDocTs [ "list the available packages of a config"] ]
-        in vcat [ "manage nix configs for ~home installation\n\nModes:"
-                , empty <$$> text "list-packages" ⊞ align list_packages ]
-  getArgs ≫ stdMain progDesc parseOptions (myMain @UsageParseAesonFPPIOError)
+  let desc =
+        vcat $ [ "manage nix configs for ~home installation", empty ]
+  getArgs ≫ stdMain desc parseOptions (myMain @NixProgramError)
 
 -- that's all, folks! ----------------------------------------------------------

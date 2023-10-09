@@ -29,3 +29,5 @@ default.nix.bak
 cabal.project.local
 dist-newstyle/
 dist-newstyle/
+result
+result-*

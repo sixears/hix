@@ -1,76 +1,86 @@
+{-# LANGUAGE UnicodeSyntax #-}
 {-| the `profile-members` command -}
 module Nix.Profile.Members
-  ( main )
-where
+  ( main
+  ) where
 
 import Base1T
 
 -- base --------------------------------
 
-import Data.Maybe  ( fromMaybe )
-import System.IO   ( hPutStrLn, stderr )
+import Data.Function ( flip )
+import System.IO     ( hPutStrLn, stderr )
 
 -- fpath -------------------------------
 
-import FPath.Error.FPathError  ( AsFPathError )
+import FPath.Error.FPathError ( AsFPathError )
 
 -- log-plus ----------------------------
 
-import Log  ( Log )
+import Log ( Log )
 
 -- logging-effect ----------------------
 
-import Control.Monad.Log  ( LoggingT )
+import Control.Monad.Log ( LoggingT, Severity(Informational) )
+
+-- mockio ------------------------------
+
+import MockIO.DoMock ( DoMock(NoMock) )
 
 -- mockio-log --------------------------
 
-import MockIO.MockIOClass  ( MockIOClass )
+import MockIO.MockIOClass ( MockIOClass )
 
 -- monadio-plus ------------------------
 
-import MonadIO.Base   ( getArgs )
+import MonadIO.Base ( getArgs )
+
+-- mtl ---------------------------------
+
+import Control.Monad.Reader ( runReaderT )
 
 -- optparse-applicative ----------------
 
-import Options.Applicative.Builder  ( flag, help, long, metavar, short
-                                    , strArgument )
-import Options.Applicative.Types    ( Parser )
+import Options.Applicative.Builder ( flag, help, long, metavar, short,
+                                     strArgument )
+import Options.Applicative.Types   ( Parser )
 
 -- parsers -----------------------------
 
-import Text.Parser.Combinators  ( optional )
+import Text.Parser.Combinators ( optional )
 
 -- stdmain -----------------------------
 
-import StdMain             ( stdMainNoDR )
-import StdMain.UsageError  ( AsUsageError, UsageFPIOTPError )
+import StdMain            ( stdMainNoDR )
+import StdMain.UsageError ( AsUsageError, UsageFPIOTPError )
 
 -- text --------------------------------
 
-import Data.Text     ( intercalate, pack )
-import Data.Text.IO  ( putStrLn )
+import Data.Text    ( intercalate, pack )
+import Data.Text.IO ( putStrLn )
 
 -- textual-plus ------------------------
 
-import TextualPlus.Error.TextualParseError ( AsTextualParseError )
+import TextualPlus.Error.TextualParseError ( AsTextualParseError,
+                                             TextualParseError )
 
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Profile.Manifest  ( Manifest
-                             , elementsi, getNameVerPath, readManifest )
+import Nix.Profile.Manifest ( elementsi, readManifest )
+import Nix.Types.Manifest   ( Manifest, getNameVerPath )
 
 --------------------------------------------------------------------------------
 
 data ShowVersion = ShowVersion | NoShowVersion
-data ShowIndex   = ShowIndex   | NoShowIndex
-data ShowPath    = ShowPath    | NoShowPath
+data ShowIndex = ShowIndex | NoShowIndex
+data ShowPath = ShowPath | NoShowPath
 
-data Options = Options { showVersion ∷ ShowVersion
-                       , showIndex   ∷ ShowIndex
-                       , showPath    ∷ ShowPath
-                       , profileName ∷ 𝕄 𝕋
+data Options = Options { showVersion :: ShowVersion
+                       , showIndex   :: ShowIndex
+                       , showPath    :: ShowPath
+                       , profileName :: 𝕄 𝕋
                        }
 
 ----------------------------------------
@@ -109,7 +119,7 @@ output_data options manifest =
                               ]
 
       print_name_ver (i,e) = do
-        case getNameVerPath e of
+        case getNameVerPath @TextualParseError e of
           𝕷 err     → pShow err
           𝕽 (n,v,p) → putStrLn (intercalate "\t" $ get_columns i n v p)
 
@@ -122,8 +132,8 @@ myMain ∷ ∀ ε . (HasCallStack, Printable ε, AsUsageError ε,
          Options → LoggingT (Log MockIOClass) (ExceptT ε IO) Word8
 myMain options = do
   -- Strict' version performs conversion immediately
-  readManifest (fromMaybe "" $ profileName options) ≫ \ case
-    𝕷 e → liftIO $ hPutStrLn stderr $ show e
+  flip runReaderT NoMock $ readManifest Informational (profileName options) ≫ \ case
+    𝕷 e     → liftIO $ hPutStrLn stderr $ show e
     𝕽 stuff → liftIO $ output_data options stuff
   return 0
 

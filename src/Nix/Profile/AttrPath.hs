@@ -1,50 +1,65 @@
+{-# LANGUAGE UnicodeSyntax #-}
 {-| A nix module attr path (e.g., `packages.x86_64-linux.jq`).
     A single @AttrPath@ may relate to multiple @StorePaths@, e.g., `-bin`,
     `-man`.
 -}
 module Nix.Profile.AttrPath
-  ( apPkg, tests )
-where
+  ( AttrPath
+  , apPkg
+  , tests
+  ) where
 
 import Base1T
 
+-- aeson -------------------------------
+
+import Data.Aeson       ( FromJSON(parseJSON), Value(String) )
+import Data.Aeson.Types ( typeMismatch )
+
 -- base --------------------------------
 
-import qualified  Data.List.NonEmpty  as  NonEmpty
+import Data.List.NonEmpty qualified as NonEmpty
 
-import Data.List  ( reverse )
-import GHC.Exts   ( fromString )
+import Control.Monad.Fail ( fail )
+import Data.List          ( reverse )
+import GHC.Exts           ( fromString )
+
+-- data-textual ------------------------
+
+import Data.Textual ( Parsed(Malformed, Parsed) )
 
 -- parsers -----------------------------
 
-import Text.Parser.Char         ( char, noneOf )
-import Text.Parser.Combinators  ( sepByNonEmpty )
+import Text.Parser.Char        ( char, noneOf )
+import Text.Parser.Combinators ( sepByNonEmpty )
 
 -- text --------------------------------
 
-import Data.Text  ( intercalate, pack, unpack )
+import Data.Text ( intercalate, pack, unpack )
 
 -- text-printer ------------------------
 
-import qualified  Text.Printer  as  P
+import Text.Printer qualified as P
 
 -- textual-plus ------------------------
 
-import TextualPlus  ( ParseableInput, TextualPlus( textual' )
-                    , parseText, tparse )
-import TextualPlus.Error.TextualParseError
-                    ( AsTextualParseError, tparseToME' )
+import TextualPlus                         ( ParseableInput,
+                                             TextualPlus(textual'), parseText,
+                                             tparse )
+import TextualPlus.Error.TextualParseError ( AsTextualParseError, tparseToME' )
 
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Types  ( Pkg( unPkg ) )
+import Nix.Types ( Pkg(unPkg) )
 
 --------------------------------------------------------------------------------
 
-data AttrPath = AttrPath { _attrPrefixParts ∷ [𝕋], _pkg ∷ Pkg }
-  deriving (Eq,Show)
+data AttrPath = AttrPath { _attrPrefixParts :: [𝕋]
+                         , _pkg             :: Pkg
+                         }
+  deriving (Eq, Show)
 
 instance Printable AttrPath where
   print (AttrPath ps p) = P.text $ intercalate "." (ps ⊕ [unPkg p])
@@ -56,6 +71,12 @@ instance TextualPlus AttrPath where
         mkAttrPath' ∷ NonEmpty 𝕊 → AttrPath
         mkAttrPath' = mkAttrPath ∘ NonEmpty.reverse
     in  mkAttrPath' ⊳ sepByNonEmpty (some (noneOf ".")) (char '.')
+
+instance FromJSON AttrPath where
+  parseJSON (String s) = case parseText s of
+    Malformed es e → fail $ [fmt|%L ⫽ %s|] es e
+    Parsed t       → return t
+  parseJSON invalid = typeMismatch "AttrPath" invalid
 
 checkT ∷ (TextualPlus α, Eq α, Show α) ⇒ 𝕋 → α → TestTree
 checkT input exp =

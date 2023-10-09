@@ -1,33 +1,42 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE UnicodeSyntax      #-}
 
 {-| miscellaneous small types used in nix profile representation -}
 module Nix.Types
-  ( Arch( unArch ), Hash( unHash ), Pkg( unPkg ), Ver( unVer )
-  , pkgRE, x86_64Linux )
-where
+  ( Arch(unArch)
+  , Hash(unHash)
+  , Pkg(unPkg)
+  , Ver(unVer)
+  , pkgRE
+  , x86_64Linux
+  ) where
 
 import Base1T
 
 -- aeson -------------------------------
 
-import Data.Aeson  ( FromJSONKey )
+import Data.Aeson ( FromJSONKey )
 
 -- base --------------------------------
 
-import Data.Char  ( isAlpha, isAlphaNum )
-import Data.List  ( intercalate )
-import GHC.Exts   ( IsString( fromString ) )
+import Data.Char ( isAlpha, isAlphaNum )
+import Data.List ( intercalate )
+import GHC.Exts  ( IsString(fromString) )
+
+-- deepseq -----------------------------
+
+import Control.DeepSeq ( NFData )
 
 -- parsers -----------------------------
 
-import Text.Parser.Char         ( CharParsing, char, digit, satisfy )
-import Text.Parser.Combinators  ( count, optional, try, unexpected )
+import Text.Parser.Char        ( CharParsing, char, digit, satisfy )
+import Text.Parser.Combinators ( optional, try )
 
 --------------------------------------------------------------------------------
 
 {-| a nix (linux) architecture -}
-newtype Arch = Arch { unArch ∷ 𝕋 }
-  deriving newtype (Eq,FromJSONKey,IsString,Ord,Printable,Show)
+newtype Arch = Arch { unArch :: 𝕋 }
+  deriving newtype (Eq, FromJSONKey, IsString, Ord, Printable, Show)
 
 {-| @Arch@ label for x86_64-linux -}
 x86_64Linux ∷ Arch
@@ -36,18 +45,20 @@ x86_64Linux = "x86_64-linux"
 ------------------------------------------------------------
 
 {-| a nix package hash -}
-newtype Hash = Hash { unHash ∷ 𝕋 } deriving newtype (Eq,IsString,Printable,Show)
+newtype Hash = Hash { unHash :: 𝕋 }
+  deriving newtype (Eq, IsString, Printable, Show)
 
 ------------------------------------------------------------
 
 {-| a nix package name -}
-newtype Pkg  = Pkg  { unPkg  ∷ 𝕋 }
-  deriving newtype (Eq,FromJSONKey,IsString,Ord,Printable,Show)
+newtype Pkg = Pkg { unPkg :: 𝕋 }
+  deriving newtype (Eq, FromJSONKey, IsString, NFData, Ord, Printable, Show)
 
 ------------------------------------------------------------
 
 {-| a nix package version -}
-newtype Ver  = Ver  { unVer  ∷ 𝕋 } deriving newtype (Eq,IsString,Printable,Show)
+newtype Ver = Ver { unVer :: 𝕋 }
+  deriving newtype (Eq, IsString, Printable, Show)
 
 ------------------------------------------------------------
 
