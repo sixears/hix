@@ -11,9 +11,9 @@ import Base1T
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Flake             qualified as Flake
-import Nix.Profile.AttrPath  qualified as AttrPath
-import Nix.Profile.StorePath qualified as StorePath
+import Nix.Flake           qualified as Flake
+import Nix.Types.AttrPath  qualified as AttrPath
+import Nix.Types.StorePath qualified as StorePath
 
 --------------------------------------------------------------------------------
 

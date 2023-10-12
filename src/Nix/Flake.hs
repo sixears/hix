@@ -16,6 +16,7 @@ module Nix.Flake
   , ver
   , x86_64
   , x86_64_
+  , x86_64_pkgs
   ) where
 
 import Base1T
@@ -105,9 +106,11 @@ import TextualPlus qualified
 
 import Nix.Paths qualified as Paths
 
-import Nix.Error ( AsNixDuplicatePkgError, AsNixError,
-                   throwAsNixDuplicatePkgError, throwAsNixErrorDuplicatePkg )
-import Nix.Types ( Arch, Pkg, Ver, pkgRE, x86_64Linux )
+import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
+                            throwAsNixDuplicatePkgError,
+                            throwAsNixErrorDuplicatePkg )
+import Nix.Types          ( Arch, Pkg, Ver, pkgRE, x86_64Linux )
+import Nix.Types.AttrPath ( AttrPath, mkAttrPath )
 
 --------------------------------------------------------------------------------
 
@@ -240,13 +243,14 @@ pkgFind fp p =
 
 ----------------------------------------
 
-pkgName ∷ (Arch,FlakePkg) → 𝕋
-pkgName (arch,fp) = [fmt|packages.%T.%T|] arch (fp ⊣ pkg)
+pkgName ∷ (Arch,FlakePkg) → AttrPath
+pkgName (arch,fp) = mkAttrPath (fp ⊣ pkg) ["packages", (toText arch)]
 
 ----------------------------------------
 
 pkgFindName_ ∷ (MonadError ε η) ⇒
-               (Pkg → AbsFile → η (𝕄 𝕋)) → FlakePkgs → Pkg → η (𝕄 𝕋)
+               (Pkg → AbsFile → η (𝕄 AttrPath)) → FlakePkgs → Pkg
+             → η (𝕄 AttrPath)
 pkgFindName_ t fp p = case pkgFind fp p of
                      []    → return 𝕹
                      [afp] → return $ 𝕵 (pkgName afp)
@@ -255,27 +259,27 @@ pkgFindName_ t fp p = case pkgFind fp p of
 --------------------
 
 pkgFindName ∷ (AsNixDuplicatePkgError ε, MonadError ε η) ⇒
-              FlakePkgs → Pkg → η (𝕄 𝕋)
+              FlakePkgs → Pkg → η (𝕄 AttrPath)
 pkgFindName = pkgFindName_ throwAsNixDuplicatePkgError
 
 --------------------
 
-pkgFindName' ∷ (AsNixError ε, MonadError ε η) ⇒ FlakePkgs → Pkg → η (𝕄 𝕋)
+pkgFindName' ∷ (AsNixError ε, MonadError ε η) ⇒ FlakePkgs → Pkg → η (𝕄 AttrPath)
 pkgFindName' = pkgFindName_ throwAsNixErrorDuplicatePkg
 
 ----------------------------------------
 
 pkgFindNames_ ∷ (Traversable ψ, MonadError ε η) ⇒
-                (FlakePkgs → Pkg → η (𝕄 𝕋)) → FlakePkgs → ψ Pkg
-              → η (ψ (Pkg, 𝕄 𝕋))
+                (FlakePkgs → Pkg → η (𝕄 AttrPath)) → FlakePkgs → ψ Pkg
+              → η (ψ (Pkg, 𝕄 AttrPath))
 pkgFindNames_ f fp = mapM (\ p → (p,) ⊳ f fp p)
 
 pkgFindNames ∷ (Traversable ψ, AsNixDuplicatePkgError ε, MonadError ε η) ⇒
-               FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 𝕋))
+               FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 AttrPath))
 pkgFindNames = pkgFindNames_ pkgFindName
 
 pkgFindNames' ∷ (Traversable ψ, AsNixError ε, MonadError ε η) ⇒
-                FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 𝕋))
+                FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 AttrPath))
 pkgFindNames' = pkgFindNames_ pkgFindName'
 
 ----------------------------------------
@@ -387,6 +391,13 @@ flakePkgMap = flakePkgMap_ throwAsNixDuplicatePkgError
 flakePkgMap' ∷ ∀ ε η . (AsNixError ε, MonadError ε η) ⇒
                FlakePkgs → η (Map.Map Pkg 𝕋)
 flakePkgMap' = flakePkgMap_ throwAsNixErrorDuplicatePkg
+
+----------------------------------------
+
+x86_64_pkgs ∷ FlakePkgs → [Pkg]
+x86_64_pkgs fp = case x86_64 fp of
+                   𝕹   → []
+                   𝕵 m → Map.keys m
 
 -- tests -----------------------------------------------------------------------
 

@@ -68,9 +68,9 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError,
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Profile.AttrPath  ( AttrPath, apPkg )
-import Nix.Profile.StorePath ( spPkgVerPath )
-import Nix.Types             ( Pkg, Ver )
+import Nix.Types           ( Pkg, Ver )
+import Nix.Types.AttrPath  ( AttrPath, apPkg )
+import Nix.Types.StorePath ( spPkgVerPath )
 
 --------------------------------------------------------------------------------
 

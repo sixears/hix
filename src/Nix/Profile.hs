@@ -11,28 +11,34 @@ import Data.Function ( flip )
 
 -- fpath -------------------------------
 
-import FPath.AbsDir           ( AbsDir, absdir )
-import FPath.AppendableFPath  ( (⫻) )
-import FPath.Dir              ( Dir(DirA, DirR) )
+import FPath.AbsDir          ( AbsDir, absdir )
+import FPath.AppendableFPath ( (⫻) )
+-- import FPath.Dir              ( Dir(DirA, DirR) )
 import FPath.Error.FPathError ( AsFPathError )
 import FPath.Parseable        ( parse, parseDir )
 import FPath.PathComponent    ( PathComponent, pc )
-import FPath.RelDir           ( RelDir, reldir )
+import FPath.RelDir           ( RelDir )
 import FPath.RelFile          ( RelFile )
 import FPath.ToDir            ( toDir )
 
 -- monadio-plus ------------------------
 
 import MonadIO.FPath ( pResolve )
-import MonadIO.User  ( getUserName', homePath )
+import MonadIO.User  ( getUserName' )
 
 -- non-empty-containers ----------------
 
-import NonEmptyContainers.IsNonEmpty ( fromNonEmpty )
+-- import NonEmptyContainers.IsNonEmpty ( fromNonEmpty )
 
 -- text --------------------------------
 
 import Data.Text qualified
+
+------------------------------------------------------------
+--                     local imports                      --
+------------------------------------------------------------
+
+import Nix.Types ( ProfileDir(ProfileDir) )
 
 --------------------------------------------------------------------------------
 
@@ -67,15 +73,17 @@ profileAppend top = (top ⫻) ∘ fromList ∘ pure ∘ unProfileName
 
 {-| find a profile dir from a profile name, assuming the use of `profilesTop` -}
 profileDir ∷ (MonadIO μ,AsIOError ε,AsFPathError ε,Printable ε,MonadError ε μ)⇒
-             ProfileName → μ AbsDir
-profileDir = (profilesTop ⊲) ∘ flip profileAppend
+             ProfileName → μ ProfileDir
+profileDir = ProfileDir ⩺ (profilesTop ⊲) ∘ flip profileAppend
 
 ----------------------------------------
 
 {-| Where we expect to find local symlinks to nix profiles. -}
+{-
 homeNixProfiles ∷ (AsIOError ε, AsFPathError ε, MonadError ε μ, MonadIO μ) ⇒
                   μ AbsDir
 homeNixProfiles = homePath [reldir|.nix-profiles/|]
+-}
 
 ------------------------------------------------------------
 
@@ -88,29 +96,35 @@ class AsProfileDir α where
   {-| The one true dir for a profile, found under `/nix`. -}
   nixProfileAbsDir ∷ α → (MonadIO μ, AsFPathError ε, AsIOError ε,
                           Printable ε, MonadError ε μ) ⇒
-                     μ AbsDir
+                     μ ProfileDir
+{-
   {-| The dir for a profile, found under `~/.nix-profiles` -}
   nixProfileLocalDir ∷ (MonadIO μ, AsFPathError ε, AsIOError ε, MonadError ε μ)⇒
-                       α → μ AbsDir
+                       α → μ ProfileDir
+-}
 
 --------------------
 
 instance AsProfileDir ProfileName where
   nixProfileAbsDir p = profileDir p
 
+{-
   nixProfileLocalDir p =
     homeNixProfiles ⊲ (⫻ fromNonEmpty (pure $ unProfileName p))
+-}
 
 --------------------
 
 defaultAbsProfile ∷ ∀ ε μ . (MonadIO μ, MonadError ε μ,
                              AsIOError ε, AsFPathError ε, Printable ε) ⇒
-                    μ AbsDir
+                    μ ProfileDir
 defaultAbsProfile = profileDir (ProfileName [pc|profile|])
+{-
 defaultLocalProfile ∷ ∀ ε μ . (MonadIO μ, MonadError ε μ,
                                AsIOError ε, AsFPathError ε) ⇒
                       μ AbsDir
 defaultLocalProfile = homePath [reldir|.nix-profile/|]
+-}
 
 instance AsProfileDir (𝕄 𝕋) where
   nixProfileAbsDir 𝕹 = defaultAbsProfile
@@ -119,13 +133,15 @@ instance AsProfileDir (𝕄 𝕋) where
     userName ← getUserName' ≫ parseDir ∘ toText
     case (≡ '/') `Data.Text.find` p of
       𝕹   → do n ← parse @RelFile p
-               return $ perUserProfiles ⫻ userName ⫻ toDir n
-      𝕵 _ → pResolve p
+               return ∘ ProfileDir $ perUserProfiles ⫻ userName ⫻ toDir n
+      𝕵 _ → ProfileDir ⊳ pResolve p
 
+{-
   nixProfileLocalDir 𝕹 = defaultLocalProfile
   nixProfileLocalDir (𝕵 "") = defaultLocalProfile
   nixProfileLocalDir (𝕵 p) = parseDir p ≫ \ case
     DirR p' → homeNixProfiles ⊲ (⫻ p')
     DirA p' → return p'
+-}
 
 -- that's all, folks! ----------------------------------------------------------

@@ -20,7 +20,6 @@ import Data.Maybe ( catMaybes )
 
 -- fpath -------------------------------
 
-import FPath.AbsDir           ( AbsDir )
 import FPath.AbsFile          ( AbsFile )
 import FPath.AppendableFPath  ( (⫻) )
 import FPath.Error.FPathError ( AsFPathError )
@@ -75,14 +74,14 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Error            ( AsNixDuplicatePkgError, AsNixError,
-                              throwAsNixDuplicatePkgError,
-                              throwAsNixErrorDuplicatePkg )
-import Nix.Profile          ( nixProfileAbsDir )
-import Nix.Profile.AttrPath ( AttrPath )
-import Nix.Types            ( Pkg )
-import Nix.Types.Manifest   ( Manifest, ManifestElement, attrPath, elements,
-                              getNameVerPath, location, readManifestFile )
+import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
+                            throwAsNixDuplicatePkgError,
+                            throwAsNixErrorDuplicatePkg )
+import Nix.Profile        ( nixProfileAbsDir )
+import Nix.Types          ( Pkg, ProfileDir(unProfileDir) )
+import Nix.Types.AttrPath ( AttrPath )
+import Nix.Types.Manifest ( Manifest, ManifestElement, attrPath, elements,
+                            getNameVerPath, location, readManifestFile )
 
 --------------------------------------------------------------------------------
 
@@ -94,7 +93,7 @@ profileManifest ∷ ∀ ε τ ω μ .
                    Printable τ, MonadIO μ) ⇒
                   (𝕄 τ) → μ AbsFile
 profileManifest (fmap toText → d) = do
-  dir ← nixProfileAbsDir d
+  dir ← unProfileDir ⊳ nixProfileAbsDir d
 
   fexists Informational FExists dir NoMock ≫ \ case
     NoFExists → throwUserError $ [fmtT|No such profile dir '%T'|] dir
@@ -113,8 +112,9 @@ readManifestDir ∷ ∀ ε ω μ .
                (MonadIO μ, MonadReader DoMock μ,
                 AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
                 HasIOClass ω, HasDoMock ω, Default ω, MonadLog (Log ω) μ) ⇒
-               Severity → AbsDir → μ (𝔼 𝕊 Manifest)
-readManifestDir sev = readManifestFile sev ∘ (⫻ [relfile|manifest.json|])
+               Severity → ProfileDir → μ (𝔼 𝕊 Manifest)
+readManifestDir sev =
+  readManifestFile sev ∘ (⫻ [relfile|manifest.json|]) ∘ unProfileDir
 
 {-| Given a name (e.g., "default", or "desktop"; or the empty string meaning the
     default profile from ~/.nix-profile/; read the `manifest.json` file for that

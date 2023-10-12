@@ -5,7 +5,8 @@
 module Nix.Types
   ( Arch(unArch)
   , Hash(unHash)
-  , Pkg(unPkg)
+  , Pkg(Pkg, unPkg)
+  , ProfileDir(ProfileDir, unProfileDir)
   , Ver(unVer)
   , pkgRE
   , x86_64Linux
@@ -26,6 +27,10 @@ import GHC.Exts  ( IsString(fromString) )
 -- deepseq -----------------------------
 
 import Control.DeepSeq ( NFData )
+
+-- fpath -------------------------------
+
+import FPath.AbsDir ( AbsDir )
 
 -- parsers -----------------------------
 
@@ -59,6 +64,12 @@ newtype Pkg = Pkg { unPkg :: 𝕋 }
 {-| a nix package version -}
 newtype Ver = Ver { unVer :: 𝕋 }
   deriving newtype (Eq, IsString, Printable, Show)
+
+------------------------------------------------------------
+
+{-| a nix package version -}
+newtype ProfileDir = ProfileDir { unProfileDir :: AbsDir }
+  deriving newtype (Eq, Printable, Show)
 
 ------------------------------------------------------------
 
