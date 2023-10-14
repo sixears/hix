@@ -24,15 +24,13 @@ import Data.Aeson.Error ( AsAesonError )
 
 -- base --------------------------------
 
-import Data.List.NonEmpty qualified as NonEmpty
-
 import Control.Applicative ( optional )
+import Data.Foldable       ( Foldable )
 import Data.Function       ( flip )
 import Data.Functor        ( Functor )
 import Data.List           ( any, intersect, repeat, sort, transpose, zip,
                              zipWith )
 import Data.List.NonEmpty  ( nonEmpty )
-import GHC.Exts            ( IsString(fromString) )
 
 -- containers --------------------------
 
@@ -78,7 +76,7 @@ import MockIO.IOClass ( HasIOClass )
 
 -- mockio-log --------------------------
 
-import MockIO.Log ( HasDoMock, MockIOClass, infoIO, warnIO )
+import MockIO.Log ( MockIOClass, infoIO, warnIO )
 
 -- mockio-plus -------------------------
 
@@ -91,7 +89,7 @@ import MonadError.IO.Error ( throwUserError )
 
 -- monadio-plus ------------------------
 
-import MonadIO                       ( say, warn )
+import MonadIO                       ( say )
 import MonadIO.Base                  ( getArgs )
 import MonadIO.Error.CreateProcError ( AsCreateProcError )
 import MonadIO.Error.ProcExitError   ( AsProcExitError )
@@ -130,7 +128,7 @@ import StdMain.UsageError ( AsUsageError, throwUsage )
 
 -- text --------------------------------
 
-import Data.Text ( intercalate, takeWhileEnd, unpack )
+import Data.Text ( intercalate )
 
 -- textual-plus ------------------------
 
@@ -140,7 +138,8 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Paths qualified as Paths
+import Nix.Paths          qualified as Paths
+import Nix.Types.AttrPath qualified as AttrPath
 
 import Nix.Error            ( AsNixError, NixProgramError )
 import Nix.Flake            ( FlakePkg, FlakePkgs, flakeShow, flakeShow', pkg,
@@ -149,7 +148,6 @@ import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
 import Nix.Types            ( Pkg(Pkg), ProfileDir )
 import Nix.Types.AttrPath   ( AttrPath )
-import Nix.Types.Manifest   ( Manifest )
 
 --------------------------------------------------------------------------------
 
@@ -334,17 +332,17 @@ configDirFromAbs f = do
 
 ----------------------------------------
 
-nixDo ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
-                   AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                   AsProcExitError ε, Printable ε,
-                   MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-        [𝕋] → μ ()
-nixDo args = snd ⊳ ꙩ (Paths.nix, args)
+nixDo ∷ ∀ ε δ φ μ . (MonadIO μ, Foldable φ, MonadReader δ μ, HasDoMock δ,
+                     AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                     AsProcExitError ε, Printable ε,
+                     MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
+        φ 𝕋 → μ ()
+nixDo args = snd ⊳ ꙩ (Paths.nix, toList args)
 
 ----------------------------------------
 
-mkTargets ∷ AbsDir → [𝕋] → [𝕋]
-mkTargets config_dir attr_paths = [fmt|%T#%t|] config_dir ⊳ attr_paths
+mkTargets ∷ (Functor φ, Printable τ) ⇒ AbsDir → φ τ → φ 𝕋
+mkTargets config_dir attr_paths = [fmt|%T#%T|] config_dir ⊳ attr_paths
 
 ----------------------------------------
 
@@ -356,16 +354,26 @@ warn' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
 warn' t = asks (view doMock) ≫ \ mock → warnIO mock t
 
+msg ∷ ∀ τ δ φ η . (MonadIO η, Foldable φ, Printable τ,
+                   HasDoMock δ, MonadReader δ η, MonadLog (Log MockIOClass) η) ⇒
+      𝕋 → τ → φ AttrPath → η ()
+msg verb object attr_paths = do
+  let names = sort $ toText ∘ view AttrPath.pkg ⊳ toList attr_paths
+  warn' $ [fmt|%t: %L|] verb names
+  info' $ [fmt|%t: (%T) %L|] verb object attr_paths
+
+----------------------------------------
+
 nixBuild ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
                       AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                       AsProcExitError ε, Printable ε, MonadError ε μ,
                       MonadLog (Log MockIOClass) μ) ⇒
-           AbsDir → [AttrPath] → μ ()
+           AbsDir → NonEmpty AttrPath → μ ()
 nixBuild config_dir attr_paths = do
-  warn' $ [fmt|building: %L|] (sort $ takeWhileEnd (≢ '.') ∘ toText ⊳ attr_paths)
-  info' $ [fmt|building: (%T) %L|] config_dir attr_paths
-  let targets = mkTargets config_dir (toText ⊳ attr_paths)
-  nixDo $ [ "build", "--log-format", "bar-with-logs", "--no-link" ] ⊕ targets
+  msg "building" config_dir attr_paths
+  let targets = mkTargets config_dir attr_paths
+  nixDo $ [ "build", "--log-format", "bar-with-logs", "--no-link" ] ⊕
+          (toList targets)
 
 ----------------------------------------
 
@@ -373,11 +381,12 @@ nixProfileRemove ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ
                               AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                               AsProcExitError ε, Printable ε, MonadError ε μ,
                               MonadLog (Log MockIOClass) μ) ⇒
-                   ProfileDir → [𝕋] → μ ()
-nixProfileRemove profile pkgs = do
---  warn' $ [fmt|removing: %L|]
-  warn $ [fmtT|removing: (%T) %L|] profile pkgs
-  nixDo $ ["profile", "remove", "--verbose", "--profile", toText profile] ⊕ pkgs
+                   ProfileDir → [AttrPath] → μ ()
+nixProfileRemove _ [] = return ()
+nixProfileRemove profile attr_paths = do
+  msg "removing" profile attr_paths
+  nixDo $ ["profile", "remove", "--verbose", "--profile", toText profile] ⊕
+          (toText ⊳ attr_paths)
 
 ----------------------------------------
 
@@ -385,21 +394,12 @@ nixProfileInstall ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock �
                               AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                               AsProcExitError ε, Printable ε, MonadError ε μ,
                               MonadLog (Log MockIOClass) μ) ⇒
-                   AbsDir → ProfileDir → [𝕋] → μ ()
+                   AbsDir → ProfileDir → NonEmpty AttrPath → μ ()
 nixProfileInstall config_dir profile attr_paths = do
-  warn $ [fmtT|installing: (%T→%T) %L|] config_dir profile attr_paths
+  msg "installing" ([fmtT|%T→%T|] config_dir profile) attr_paths
   let targets = mkTargets config_dir attr_paths
-  nixDo $ [ "profile", "install", "--profile", toText profile ] ⊕ targets
-
-----------------------------------------
-
-fromText ∷ IsString α ⇒ 𝕋 → α
-fromText = fromString ∘ unpack
-
-----------------------------------------
-
-fromTexts ∷ (Functor ψ, IsString α) ⇒ ψ 𝕋 → ψ α
-fromTexts = (fromText ⊳)
+  nixDo $ [ "profile", "install", "--profile", toText profile ] ⊕
+          (toList targets)
 
 ----------------------------------------
 
@@ -421,15 +421,13 @@ checkPackages ∷ ∀ ε α μ .
                  AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
                  AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
                  Printable ε, MonadError ε μ) ⇒
---                (AbsDir → ProfileDir → [𝕋] → μ α) → Maybe 𝕋
-                (AbsDir → ProfileDir → [AttrPath] → μ α) → Maybe 𝕋
+                (AbsDir → ProfileDir → NonEmpty AttrPath → μ α) → Maybe 𝕋
               → Packages → μ α
 checkPackages f c pkgs = do
   config_dir     ← maybe configDefault configDirFromAbs c
   target_profile ← nixProfileAbsDir c
 
   flkPkgs ∷ FlakePkgs ← flakeShow' config_dir
-  say flkPkgs
 
   pkgs' ∷ NonEmpty Pkg ← case pkgs of
             SomePackages ps → return ps
@@ -437,14 +435,16 @@ checkPackages f c pkgs = do
               case nonEmpty $ x86_64_pkgs flkPkgs of
                 𝕹    → throwUserError $ [fmtT|no packages found: %T|] config_dir
                 𝕵 ps → return ps
-  partitionMaybes ∘ NonEmpty.toList ⊳ pkgFindNames' flkPkgs pkgs' ≫ \ case
+  partitionMaybes ∘ toList ⊳ pkgFindNames' flkPkgs pkgs' ≫ \ case
     (missing:[],_) →
       throwUsage $ [fmtT|package not found: %T|] missing
     (missing@(_:_:_),_) →
       throwUsage $ [fmtT|packages not found: %L|] missing
-    ([],fmap snd → attr_paths) →
-      -- f config_dir target_profile (toText ⊳ attr_paths)
-      f config_dir target_profile attr_paths
+    ([],pkgs'') → case  nonEmpty (snd ⊳ pkgs'') of
+                    𝕵 attr_paths → f config_dir target_profile attr_paths
+                    𝕹 →
+                      throwUsage $ ("internal error: nonEmpty pkgs' means " ∷ 𝕋)
+                                 ⊕ "this should never happen"
 
 ----------------------------------------
 
@@ -452,17 +452,15 @@ mainInstall ∷ ∀ ε δ μ .
               (MonadIO μ, AsProcExitError ε, AsCreateProcError ε,
                AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
                HasDoMock δ, MonadReader δ μ, MonadLog (Log MockIOClass) μ) ⇒
---              AbsDir → ProfileDir → [𝕋] → μ Word8
-              AbsDir → ProfileDir → [AttrPath] → μ Word8
+              AbsDir → ProfileDir → NonEmpty AttrPath → μ Word8
 
 mainInstall config_dir target_profile attr_paths = do
   -- test build all the packages, before we make any destructive changes to
   -- the profile
   nixBuild config_dir attr_paths
 
-  profile_manifest ∷ Manifest ← noMock $ do
-    m ← readManifestDir Informational target_profile
-    either throwUserError return m
+  profile_manifest ← noMock $
+    readManifestDir Informational target_profile ≫ either throwUserError return
 
   -- pre-remove anything found in the manifest; we're replacing/updating,
   -- rather than adding
@@ -478,11 +476,9 @@ mainInstall config_dir target_profile attr_paths = do
 
   -- nix profile install adds a new package without removing the older one
 
-  let removals = let text_paths = toText ⊳ attrPaths profile_manifest
-                 in  text_paths `intersect` (toText ⊳ attr_paths)
+  let removals = intersect (attrPaths profile_manifest) (toList attr_paths)
   nixProfileRemove target_profile removals
-
-  nixProfileInstall config_dir target_profile (toText ⊳ attr_paths)
+  nixProfileInstall config_dir target_profile attr_paths
   return 0
 
 ----------------------------------------
@@ -516,7 +512,6 @@ myMain do_mock opts = flip runReaderT do_mock $
 {-| program main entry point -}
 main ∷ MonadIO μ ⇒ μ ()
 main = do
--- ?add logging options
 -- show all configs (as option)
   let desc =
         vcat $ [ "manage nix configs for ~home installation", empty ]
