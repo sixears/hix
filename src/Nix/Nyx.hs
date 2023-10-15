@@ -36,10 +36,6 @@ import Data.List.NonEmpty  ( nonEmpty )
 
 import Data.Map.Strict qualified as Map
 
--- data-textual ------------------------
-
-import Data.Textual ( Textual(textual) )
-
 -- fpath -------------------------------
 
 import FPath.Abs              ( Abs(AbsD, AbsF) )
@@ -49,7 +45,7 @@ import FPath.AppendableFPath  ( (⫻) )
 import FPath.Basename         ( basename )
 import FPath.Dirname          ( dirname )
 import FPath.Error.FPathError ( AsFPathError )
-import FPath.Parseable        ( parse )
+import FPath.Parseable        ( parse, readM )
 import FPath.PathComponent    ( PathComponent )
 import FPath.RelDir           ( reldir )
 import FPath.RelFile          ( relfile )
@@ -108,8 +104,8 @@ import Natural ( length, replicate )
 -- optparse-applicative ----------------
 
 import Options.Applicative.Builder     ( command, flag', help, info, long,
-                                         progDesc, short, strArgument,
-                                         strOption, subparser )
+                                         option, progDesc, short, strArgument,
+                                         subparser )
 import Options.Applicative.Help.Pretty ( empty, vcat )
 import Options.Applicative.Types       ( Parser )
 
@@ -146,7 +142,8 @@ import Nix.Flake            ( FlakePkg, FlakePkgs, flakeShow, flakeShow', pkg,
                               pkgFindNames', ver, x86_64_, x86_64_pkgs )
 import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
-import Nix.Types            ( Pkg(Pkg), ProfileDir )
+import Nix.Types            ( ConfigName(ConfigName, unConfigName), Pkg(Pkg),
+                              ProfileDir )
 import Nix.Types.AttrPath   ( AttrPath )
 
 --------------------------------------------------------------------------------
@@ -195,9 +192,9 @@ columnify pads zs =
 data Packages = AllPackages
               | SomePackages (NonEmpty Pkg)
 
-data Mode = ModeListPkgs (𝕄 𝕋)
+data Mode = ModeListPkgs (𝕄 ConfigName)
           | ModeListConfigs
-          | ModeInstall Packages (𝕄 𝕋)
+          | ModeInstall (𝕄 ConfigName) Packages
 
 newtype Options = Options { mode :: Mode }
 
@@ -207,14 +204,15 @@ newtype Options = Options { mode :: Mode }
 parseOptions ∷ Parser Options
 parseOptions =
   let
-    config_option = strOption (ю [ short 'c', long "config"
-                                 , help "select config to use" ])
+    config_option =
+      ConfigName ⊳ option readM (ю [ short 'c', long "config"
+                                   , help "select config to use" ])
     install_parser ∷ Parser Mode
     install_parser =
-      ModeInstall ⊳ (  (SomePackages ⊳ parseNE (Pkg ⊳ strArgument (help "package")))
+      ModeInstall ⊳ optional config_option
+                  ⊵ (  (SomePackages ⊳ parseNE (Pkg ⊳ strArgument (help "package")))
                      ∤ (flag' AllPackages (ю [ short 'a'
                                                   , help "all packages" ])))
-                  ⊵ optional config_option
 
   in
     Options ⊳ subparser
@@ -234,14 +232,6 @@ parseOptions =
 configTop ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
             μ AbsDir
 configTop = homePath [reldir|nix/|]
-
-----------------------------------------
-
-newtype ConfigName = ConfigName { unConfigName :: PathComponent }
-  deriving (Printable)
-
-instance Textual ConfigName where
-  textual = ConfigName ⊳ textual
 
 ----------------------------------------
 
@@ -320,7 +310,7 @@ unNegate n | n < 0     = (SignMinus, fromIntegral $ abs n)
 
 configDirFromAbs ∷ (MonadIO μ, Printable ε,
                     AsFPathError ε, AsIOError ε, MonadError ε μ)⇒
-                   𝕋 → μ AbsDir
+                   ConfigName → μ AbsDir
 configDirFromAbs f = do
   pResolve f ≫ \ case
     AbsD d → return d
@@ -421,11 +411,11 @@ checkPackages ∷ ∀ ε α μ .
                  AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
                  AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
                  Printable ε, MonadError ε μ) ⇒
-                (AbsDir → ProfileDir → NonEmpty AttrPath → μ α) → Maybe 𝕋
-              → Packages → μ α
+                (AbsDir → ProfileDir → NonEmpty AttrPath → μ α)
+              → Maybe ConfigName → Packages → μ α
 checkPackages f c pkgs = do
   config_dir     ← maybe configDefault configDirFromAbs c
-  target_profile ← nixProfileAbsDir c
+  target_profile ← nixProfileAbsDir (toText ∘ unConfigName ⊳ c)
 
   flkPkgs ∷ FlakePkgs ← flakeShow' config_dir
 
@@ -488,9 +478,9 @@ mainListPkgs ∷ (MonadIO μ, MonadReader δ μ, HasDoMock δ,
                 AsAesonError ε, AsProcExitError ε, AsCreateProcError ε,
                 AsFPathError ε, AsIOError ε, Printable ε,
                 MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-               𝕄 𝕋 → μ Word8
-mainListPkgs f = do
-  config_dir ← maybe configDefault configDirFromAbs f
+               𝕄 ConfigName → μ Word8
+mainListPkgs c = do
+  config_dir ← maybe configDefault configDirFromAbs c
   xs ∷ [(𝕋,𝕋,𝕋)] ← namePkgVers ⊳ flakeShow config_dir
   let xs' = tupleToList ⊳ xs
   forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight] xs')
@@ -505,8 +495,8 @@ myMain ∷ (HasCallStack, AsNixError ε, AsIOError ε,AsFPathError ε,AsAesonErr
          DoMock → Options → LoggingT (Log MockIOClass) (ExceptT ε IO) Word8
 myMain do_mock opts = flip runReaderT do_mock $
   case mode opts of
-    ModeListPkgs f   → mainListPkgs f
-    ModeInstall ps c → checkPackages mainInstall c ps
+    ModeListPkgs c   → mainListPkgs c
+    ModeInstall c ps → checkPackages mainInstall c ps
     ModeListConfigs  → allConfigDirs ≫ mapM_ say ⪼ return 0
 
 {-| program main entry point -}

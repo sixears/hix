@@ -4,6 +4,7 @@
 {-| miscellaneous small types used in nix profile representation -}
 module Nix.Types
   ( Arch(unArch)
+  , ConfigName(ConfigName, unConfigName)
   , Hash(unHash)
   , Pkg(Pkg, unPkg)
   , ProfileDir(ProfileDir, unProfileDir)
@@ -24,13 +25,18 @@ import Data.Char ( isAlpha, isAlphaNum )
 import Data.List ( intercalate )
 import GHC.Exts  ( IsString(fromString) )
 
+-- data-textual ------------------------
+
+import Data.Textual ( Textual(textual) )
+
 -- deepseq -----------------------------
 
 import Control.DeepSeq ( NFData )
 
 -- fpath -------------------------------
 
-import FPath.AbsDir ( AbsDir )
+import FPath.AbsDir        ( AbsDir )
+import FPath.PathComponent ( PathComponent )
 
 -- parsers -----------------------------
 
@@ -38,6 +44,14 @@ import Text.Parser.Char        ( CharParsing, char, digit, satisfy )
 import Text.Parser.Combinators ( optional, try )
 
 --------------------------------------------------------------------------------
+
+newtype ConfigName = ConfigName { unConfigName :: PathComponent }
+  deriving (Printable)
+
+instance Textual ConfigName where
+  textual = ConfigName ⊳ textual
+
+------------------------------------------------------------
 
 {-| a nix (linux) architecture -}
 newtype Arch = Arch { unArch :: 𝕋 }
