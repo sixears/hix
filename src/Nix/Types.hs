@@ -4,6 +4,7 @@
 {-| miscellaneous small types used in nix profile representation -}
 module Nix.Types
   ( Arch(unArch)
+  , ConfigDir(ConfigDir, unConfigDir)
   , ConfigName(ConfigName, unConfigName)
   , Hash(unHash)
   , Pkg(Pkg, unPkg)
@@ -36,20 +37,31 @@ import Control.DeepSeq ( NFData )
 -- fpath -------------------------------
 
 import FPath.AbsDir        ( AbsDir )
+import FPath.Parseable     ( __parse'__ )
 import FPath.PathComponent ( PathComponent )
 
 -- parsers -----------------------------
 
-import Text.Parser.Char        ( CharParsing, char, digit, satisfy )
-import Text.Parser.Combinators ( optional, try )
+import Text.Parser.Char        ( CharParsing, char, digit, lower, satisfy )
+import Text.Parser.Combinators ( choice, optional, try )
+
+-- textual-plus ------------------------
+
+import TextualPlus ( TextualPlus(textual') )
 
 --------------------------------------------------------------------------------
 
 newtype ConfigName = ConfigName { unConfigName :: PathComponent }
-  deriving (Printable)
+  deriving (Printable, Show)
 
-instance Textual ConfigName where
-  textual = ConfigName ⊳ textual
+instance TextualPlus ConfigName where
+  textual' = let parse_text = (:) ⊳ lower ⊵ many (choice [lower,digit,char '-'])
+             in  ConfigName ∘ __parse'__ ⊳ parse_text
+
+------------------------------------------------------------
+
+newtype ConfigDir = ConfigDir { unConfigDir :: AbsDir }
+  deriving (Printable, Show)
 
 ------------------------------------------------------------
 

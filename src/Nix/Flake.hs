@@ -45,7 +45,6 @@ import Data.Map.Strict qualified as Map
 
 -- fpath -------------------------------
 
-import FPath.AbsDir           ( AbsDir )
 import FPath.AbsFile          ( AbsFile )
 import FPath.AppendableFPath  ( (⫻) )
 import FPath.AsFilePath       ( filepath )
@@ -109,7 +108,8 @@ import Nix.Paths qualified as Paths
 import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
                             throwAsNixDuplicatePkgError,
                             throwAsNixErrorDuplicatePkg )
-import Nix.Types          ( Arch, Pkg, Ver, pkgRE, x86_64Linux )
+import Nix.Types          ( Arch, ConfigDir(unConfigDir), Pkg, Ver, pkgRE,
+                            x86_64Linux )
 import Nix.Types.AttrPath ( AttrPath, mkAttrPath )
 
 --------------------------------------------------------------------------------
@@ -167,7 +167,7 @@ unFlakePkgs_ (FlakePkgs' m) = m
 
 --------------------
 
-data FlakePkgs = FlakePkgs { _location :: AbsDir
+data FlakePkgs = FlakePkgs { _location :: ConfigDir
                            , _packages :: FlakePkgs'
                            }
   deriving (Show)
@@ -190,7 +190,7 @@ packages = lens (unFlakePkgs_ ∘ _packages)
 ----------------------------------------
 
 locFile ∷ FlakePkgs → AbsFile
-locFile fp = (_location fp) ⫻ [relfile|flake.nix|]
+locFile fp = (unConfigDir $ _location fp) ⫻ [relfile|flake.nix|]
 
 ----------------------------------------
 
@@ -342,14 +342,14 @@ flakeShow ∷ ∀ ε δ μ .
              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
              AsProcExitError ε, AsAesonError ε, Printable ε,
              MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-            AbsDir → μ FlakePkgs
+            ConfigDir → μ FlakePkgs
 flakeShow d = do
   let eAsAesonError ∷ (Printable τ,AsAesonError ε,MonadError ε η) ⇒ 𝔼 τ β → η β
       eAsAesonError = either throwAsAesonError return
       mock_set ∷ MLCmdSpec 𝕋 → MLCmdSpec 𝕋
       mock_set = let mock_val ∷ (ExitStatus, 𝕋) = (evOK, flakeShowTestInput)
                  in  (& mock_value ⊢ mock_val)
-      args     = ["flake", "show", "--json", pack $ d ⫥ filepath]
+      args     = ["flake", "show", "--json", pack $ (unConfigDir d) ⫥ filepath]
   (_,flake_show) ← ꙩ (Paths.nix, args, mock_set)
   eAsAesonError (FlakePkgs d ⊳ eitherDecodeStrict' (encodeUtf8 flake_show))
 
@@ -361,7 +361,7 @@ flakeShow' ∷ ∀ ε μ .
              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
              AsProcExitError ε, AsAesonError ε, Printable ε,
              MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-            AbsDir → μ FlakePkgs
+            ConfigDir → μ FlakePkgs
 flakeShow' = flip runReaderT NoMock ∘ flakeShow
 
 ----------------------------------------

@@ -126,8 +126,19 @@ defaultLocalProfile ∷ ∀ ε μ . (MonadIO μ, MonadError ε μ,
 defaultLocalProfile = homePath [reldir|.nix-profile/|]
 -}
 
+instance AsProfileDir 𝕋 where
+  nixProfileAbsDir "" = defaultAbsProfile
+  nixProfileAbsDir p = do
+    userName ← getUserName' ≫ parseDir ∘ toText
+    case (≡ '/') `Data.Text.find` p of
+      𝕹   → do n ← parse @RelFile p
+               return ∘ ProfileDir $ perUserProfiles ⫻ userName ⫻ toDir n
+      𝕵 _ → ProfileDir ⊳ pResolve p
+
 instance AsProfileDir (𝕄 𝕋) where
-  nixProfileAbsDir 𝕹 = defaultAbsProfile
+  nixProfileAbsDir 𝕹     = defaultAbsProfile
+  nixProfileAbsDir (𝕵 t) = nixProfileAbsDir t
+{-
   nixProfileAbsDir (𝕵 "") = defaultAbsProfile
   nixProfileAbsDir (𝕵 p) = do
     userName ← getUserName' ≫ parseDir ∘ toText
@@ -135,6 +146,7 @@ instance AsProfileDir (𝕄 𝕋) where
       𝕹   → do n ← parse @RelFile p
                return ∘ ProfileDir $ perUserProfiles ⫻ userName ⫻ toDir n
       𝕵 _ → ProfileDir ⊳ pResolve p
+-}
 
 {-
   nixProfileLocalDir 𝕹 = defaultLocalProfile
