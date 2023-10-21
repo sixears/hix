@@ -24,15 +24,15 @@ import Log ( Log )
 
 -- logging-effect ----------------------
 
-import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational) )
+import Control.Monad.Log ( MonadLog )
 
 -- mockio ------------------------------
 
-import MockIO.DoMock ( DoMock(NoMock), HasDoMock(doMock) )
+import MockIO.DoMock ( HasDoMock )
 
 -- mockio-log --------------------------
 
-import MockIO.Log ( MockIOClass, infoIO, warnIO )
+import MockIO.Log ( MockIOClass )
 
 -- mockio-plus -------------------------
 
@@ -50,7 +50,7 @@ import MonadIO.Process.ToMaybeTexts  ( ToMaybeTexts )
 
 -- mtl ---------------------------------
 
-import Control.Monad.Reader ( MonadReader, ReaderT, asks, runReaderT )
+import Control.Monad.Reader ( MonadReader )
 
 ------------------------------------------------------------
 --                     local imports                      --

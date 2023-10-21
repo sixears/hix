@@ -10,13 +10,18 @@ module Nix.Types
   , Pkg(Pkg, unPkg)
   , ProfileDir(ProfileDir, unProfileDir)
   , RemoteState(..)
+  , ToBriefText(toT)
   , Ver(unVer)
+  , configDirName
+  , configNameFromDir
   , pkgRE
   , remoteArgs
   , x86_64Linux
   ) where
 
 import Base1T
+
+import Prelude ( error )
 
 -- aeson -------------------------------
 
@@ -29,10 +34,6 @@ import Data.List ( intercalate )
 import Data.Ord  ( Ord(compare) )
 import GHC.Exts  ( IsString(fromString) )
 
--- data-textual ------------------------
-
-import Data.Textual ( Textual(textual) )
-
 -- deepseq -----------------------------
 
 import Control.DeepSeq ( NFData )
@@ -40,13 +41,28 @@ import Control.DeepSeq ( NFData )
 -- fpath -------------------------------
 
 import FPath.AbsDir        ( AbsDir )
+import FPath.Basename      ( Basename, basename )
+import FPath.Dir           ( DirAs )
 import FPath.Parseable     ( __parse'__ )
 import FPath.PathComponent ( PathComponent )
+import FPath.RelType       ( RelType )
+
+-- mono-traversable --------------------
+
+import Data.MonoTraversable ( Element, MonoFoldable, otoList )
 
 -- parsers -----------------------------
 
 import Text.Parser.Char        ( CharParsing, char, digit, lower, satisfy )
 import Text.Parser.Combinators ( choice, optional, try )
+
+-- safe --------------------------------
+
+import Safe ( lastMay )
+
+-- text-printer ------------------------
+
+import Text.Printer qualified as P
 
 -- textual-plus ------------------------
 
@@ -54,7 +70,22 @@ import TextualPlus ( TextualPlus(textual') )
 
 --------------------------------------------------------------------------------
 
+nixosCache ∷ 𝕋
 nixosCache = "https://cache.nixos.org/"
+
+------------------------------------------------------------
+
+class ToBriefText α where
+  toT ∷ α → 𝕋
+
+instance ToBriefText 𝕋 where
+  toT = id
+
+instance (ToBriefText α, ToBriefText β) ⇒ ToBriefText (α,β) where
+  toT (a,b) =
+    let a' = toT a
+        b' = toT b
+    in  if a' ≡ b' then a' else [fmt|%t→%t|] (toT a) (toT b)
 
 ------------------------------------------------------------
 
@@ -68,10 +99,16 @@ instance TextualPlus ConfigName where
   textual' = let parse_text = (:) ⊳ lower ⊵ many (choice [lower,digit,char '-'])
              in  ConfigName ∘ __parse'__ ⊳ parse_text
 
+instance ToBriefText ConfigName where
+  toT (ConfigName c) = toText c
+
 ------------------------------------------------------------
 
 newtype ConfigDir = ConfigDir { unConfigDir :: AbsDir }
   deriving (Printable, Show)
+
+instance ToBriefText ConfigDir where
+  toT = toT ∘ configDirName
 
 ------------------------------------------------------------
 
@@ -111,6 +148,14 @@ newtype Ver = Ver { unVer :: 𝕋 }
 newtype ProfileDir = ProfileDir { unProfileDir :: AbsDir }
   deriving newtype (Eq, Printable, Show)
 
+instance ToBriefText ProfileDir where
+  toT = toT ∘ configNameFromDir ∘ unProfileDir
+
+------------------------------------------------------------
+
+instance Printable (ConfigDir,ProfileDir) where
+  print (c,p) = P.text $ [fmt|%T→%T|] c p
+
 ------------------------------------------------------------
 
 pkgRE ∷ CharParsing η ⇒ η (Pkg, 𝕄 Ver)
@@ -134,8 +179,10 @@ pkgRE =
 
 ----------------------------------------
 
+nixOption ∷ (𝕋,𝕋) → [𝕋]
 nixOption (k,v) = [ "--option", k, v ]
 
+substituters ∷ 𝕄 𝕋 → [𝕋]
 substituters 𝕹     = []
 substituters (𝕵 x) = nixOption ("substituters",x)
 
@@ -144,5 +191,14 @@ remoteArgs r = substituters (go r)
                where go FullyConnected = 𝕹
                      go Isolated       = 𝕵 ""
                      go Remote         = 𝕵 nixosCache
+
+configDirName ∷ ConfigDir → ConfigName
+configDirName = configNameFromDir ∘ unConfigDir
+
+configNameFromDir ∷ (DirAs δ, Element (RelType δ) ~ PathComponent,
+                     MonoFoldable (RelType δ), Basename δ) ⇒ δ → ConfigName
+configNameFromDir d = case lastMay ∘ otoList $ basename d of
+                        𝕹   → error $ [fmt|could not find ConfigName of %T|] d
+                        𝕵 p → ConfigName p
 
 -- that's all, folks! ----------------------------------------------------------

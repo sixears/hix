@@ -44,10 +44,6 @@ import GHC.Generics  ( Generic )
 
 import Data.Map.Strict qualified as Map
 
--- env-plus ----------------------------
-
-import Env.Types ( ә, ӭ )
-
 -- fpath -------------------------------
 
 import FPath.AbsFile          ( AbsFile )
@@ -78,7 +74,6 @@ import MockIO.Log ( HasDoMock, MockIOClass )
 
 -- mockio-plus -------------------------
 
-import MockIO.Process           ( ꙩ )
 import MockIO.Process.MLCmdSpec ( MLCmdSpec, mock_value )
 
 -- monadio-plus ------------------------
@@ -107,8 +102,6 @@ import TextualPlus qualified
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
-
-import Nix.Paths qualified as Paths
 
 import Nix                ( nixDo )
 import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
