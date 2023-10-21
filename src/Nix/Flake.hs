@@ -9,6 +9,7 @@ module Nix.Flake
   , forMX86_64Pkg
   , forMX86_64Pkg_
   , forX86_64Pkg
+  , location
   , pkg
   , pkgFindNames
   , pkgFindNames'
@@ -42,6 +43,10 @@ import GHC.Generics  ( Generic )
 -- containers --------------------------
 
 import Data.Map.Strict qualified as Map
+
+-- env-plus ----------------------------
+
+import Env.Types ( ә, ӭ )
 
 -- fpath -------------------------------
 
@@ -105,11 +110,12 @@ import TextualPlus qualified
 
 import Nix.Paths qualified as Paths
 
+import Nix                ( nixDo )
 import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
                             throwAsNixDuplicatePkgError,
                             throwAsNixErrorDuplicatePkg )
-import Nix.Types          ( Arch, ConfigDir(unConfigDir), Pkg, Ver, pkgRE,
-                            x86_64Linux )
+import Nix.Types          ( Arch, ConfigDir(unConfigDir), Pkg, RemoteState, Ver,
+                            pkgRE, remoteArgs, x86_64Linux )
 import Nix.Types.AttrPath ( AttrPath, mkAttrPath )
 
 --------------------------------------------------------------------------------
@@ -171,6 +177,9 @@ data FlakePkgs = FlakePkgs { _location :: ConfigDir
                            , _packages :: FlakePkgs'
                            }
   deriving (Show)
+
+location ∷ Lens' FlakePkgs ConfigDir
+location = lens _location (\ fp l → fp { _location = l })
 
 instance Printable FlakePkgs where
   print fp =
@@ -342,15 +351,18 @@ flakeShow ∷ ∀ ε δ μ .
              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
              AsProcExitError ε, AsAesonError ε, Printable ε,
              MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-            ConfigDir → μ FlakePkgs
-flakeShow d = do
+            RemoteState → ConfigDir → μ FlakePkgs
+flakeShow r d = do
   let eAsAesonError ∷ (Printable τ,AsAesonError ε,MonadError ε η) ⇒ 𝔼 τ β → η β
       eAsAesonError = either throwAsAesonError return
       mock_set ∷ MLCmdSpec 𝕋 → MLCmdSpec 𝕋
       mock_set = let mock_val ∷ (ExitStatus, 𝕋) = (evOK, flakeShowTestInput)
                  in  (& mock_value ⊢ mock_val)
-      args     = ["flake", "show", "--json", pack $ (unConfigDir d) ⫥ filepath]
-  (_,flake_show) ← ꙩ (Paths.nix, args, mock_set)
+      args     = ю [ ["flake", "show", "--json" ]
+                   , remoteArgs r
+                   , [ pack $ (unConfigDir d) ⫥ filepath ] ]
+--  (_,flake_show) ← ꙩ (Paths.nix, args, [ӭ (ә "NIX_CONFIG")], mock_set)
+  flake_show ← nixDo (𝕵 mock_set) args
   eAsAesonError (FlakePkgs d ⊳ eitherDecodeStrict' (encodeUtf8 flake_show))
 
 ----------------------------------------
@@ -361,8 +373,8 @@ flakeShow' ∷ ∀ ε μ .
              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
              AsProcExitError ε, AsAesonError ε, Printable ε,
              MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-            ConfigDir → μ FlakePkgs
-flakeShow' = flip runReaderT NoMock ∘ flakeShow
+            RemoteState → ConfigDir → μ FlakePkgs
+flakeShow' r = flip runReaderT NoMock ∘ flakeShow r
 
 ----------------------------------------
 

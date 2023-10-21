@@ -9,8 +9,10 @@ module Nix.Types
   , Hash(unHash)
   , Pkg(Pkg, unPkg)
   , ProfileDir(ProfileDir, unProfileDir)
+  , RemoteState(..)
   , Ver(unVer)
   , pkgRE
+  , remoteArgs
   , x86_64Linux
   ) where
 
@@ -24,6 +26,7 @@ import Data.Aeson ( FromJSONKey )
 
 import Data.Char ( isAlpha, isAlphaNum )
 import Data.List ( intercalate )
+import Data.Ord  ( Ord(compare) )
 import GHC.Exts  ( IsString(fromString) )
 
 -- data-textual ------------------------
@@ -51,8 +54,15 @@ import TextualPlus ( TextualPlus(textual') )
 
 --------------------------------------------------------------------------------
 
+nixosCache = "https://cache.nixos.org/"
+
+------------------------------------------------------------
+
 newtype ConfigName = ConfigName { unConfigName :: PathComponent }
-  deriving (Printable, Show)
+  deriving (Eq, Printable, Show)
+
+instance Ord ConfigName where
+  compare (ConfigName p) (ConfigName p') = compare (toText p) (toText p')
 
 instance TextualPlus ConfigName where
   textual' = let parse_text = (:) ⊳ lower ⊵ many (choice [lower,digit,char '-'])
@@ -62,6 +72,10 @@ instance TextualPlus ConfigName where
 
 newtype ConfigDir = ConfigDir { unConfigDir :: AbsDir }
   deriving (Printable, Show)
+
+------------------------------------------------------------
+
+data RemoteState = FullyConnected | Remote | Isolated deriving (Show)
 
 ------------------------------------------------------------
 
@@ -117,5 +131,18 @@ pkgRE =
     fromStr p v = (fromString p, fromString ⊳ v)
   in
     (fromStr ⊳ hyphenated_identifiers ⊵ optional(char '-' ⋫ numeric_identifier))
+
+----------------------------------------
+
+nixOption (k,v) = [ "--option", k, v ]
+
+substituters 𝕹     = []
+substituters (𝕵 x) = nixOption ("substituters",x)
+
+remoteArgs ∷ RemoteState → [𝕋]
+remoteArgs r = substituters (go r)
+               where go FullyConnected = 𝕹
+                     go Isolated       = 𝕵 ""
+                     go Remote         = 𝕵 nixosCache
 
 -- that's all, folks! ----------------------------------------------------------

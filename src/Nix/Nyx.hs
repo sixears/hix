@@ -29,8 +29,8 @@ import Control.Applicative ( optional )
 import Data.Foldable       ( Foldable )
 import Data.Function       ( flip )
 import Data.Functor        ( Functor )
-import Data.List           ( any, intersect, repeat, sort, transpose, zip,
-                             zipWith )
+import Data.List           ( any, intersect, repeat, sort, sortOn, transpose,
+                             zip, zipWith )
 import Data.List.NonEmpty  ( nonEmpty )
 import Data.Maybe          ( maybeToList )
 import Data.Semigroup      ( sconcat )
@@ -63,6 +63,7 @@ import FPath.ToDir            ( ToDir(toDir) )
 import Control.Lens.Each   ( each )
 import Control.Lens.Fold   ( (^..) )
 import Control.Lens.Getter ( view )
+import Control.Lens.Tuple  ( _1 )
 
 -- log-plus ----------------------------
 
@@ -100,6 +101,10 @@ import MonadIO.FPath                 ( pResolve )
 import MonadIO.FStat                 ( isDir )
 import MonadIO.User                  ( homePath )
 
+-- mono-traversable --------------------
+
+import Data.MonoTraversable ( otoList )
+
 -- mtl ---------------------------------
 
 import Control.Monad.Reader ( MonadReader, ReaderT, asks, runReaderT )
@@ -110,9 +115,9 @@ import Natural ( length, replicate )
 
 -- optparse-applicative ----------------
 
-import Options.Applicative.Builder     ( command, eitherReader, flag', help,
-                                         info, long, option, progDesc, short,
-                                         strArgument, subparser )
+import Options.Applicative.Builder     ( command, eitherReader, flag, flag',
+                                         help, info, long, option, progDesc,
+                                         short, strArgument, subparser )
 import Options.Applicative.Help.Pretty ( empty, vcat )
 import Options.Applicative.Types       ( Parser )
 
@@ -127,7 +132,7 @@ import Text.Parser.Combinators ( sepBy1, sepByNonEmpty )
 
 -- safe --------------------------------
 
-import Safe ( maximumDef )
+import Safe ( lastMay, maximumDef )
 
 -- stdmain -----------------------------
 
@@ -152,17 +157,21 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 --                     local imports                      --
 ------------------------------------------------------------
 
+import Nix ( nixDo )
+
 import Nix.Paths          qualified as Paths
 import Nix.Types.AttrPath qualified as AttrPath
 
 import Nix.Error            ( AsNixError, NixProgramError )
-import Nix.Flake            ( FlakePkg, FlakePkgs, flakeShow, flakeShow', pkg,
-                              pkgFindNames', ver, x86_64_, x86_64_pkgs )
+import Nix.Flake            ( FlakePkg, FlakePkgs, flakeShow, flakeShow',
+                              location, pkg, pkgFindNames', ver, x86_64_,
+                              x86_64_pkgs )
 import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
 import Nix.Types            ( ConfigDir(ConfigDir, unConfigDir),
                               ConfigName(ConfigName, unConfigName), Pkg(Pkg),
-                              ProfileDir )
+                              ProfileDir,
+                              RemoteState(FullyConnected, Isolated, Remote) )
 import Nix.Types.AttrPath   ( AttrPath )
 
 --------------------------------------------------------------------------------
@@ -178,6 +187,12 @@ instance HomogenousTuple (α,α) where
 instance HomogenousTuple (α,α,α) where
   type instance TupleItem (α,α,α) = α
   tupleToList (a0,a1,a2) = [a0,a1,a2]
+
+instance HomogenousTuple (α,α,α,α) where
+  type instance TupleItem (α,α,α,α) = α
+  tupleToList (a0,a1,a2,a3
+
+              ) = [a0,a1,a2,a3]
 
 ------------------------------------------------------------
 
@@ -211,12 +226,17 @@ columnify pads zs =
 data Packages = AllPackages
               | SomePackages (NonEmpty Pkg)
 
-data Mode = ModeListPkgs (𝕄 ConfigName)
+data Configs = AllConfigs
+             | SomeConfigs [ConfigName]
+
+data Mode = ModeListPkgs Configs -- [ConfigName]
           | ModeListConfigs
-          --          | ModeInstall [ConfigName] Packages
+          | ModeListConfigNames
           | ModeInstall [ConfigName] Packages
 
-newtype Options = Options { mode :: Mode }
+data Options = Options { remote_state :: RemoteState
+                       , mode         :: Mode
+                       }
 
 ----------------------------------------
 
@@ -224,11 +244,6 @@ throwUsage' ∷ ∀ ε ω η . (AsUsageError ε, MonadError ε η) ⇒ 𝕋 → 
 throwUsage' = throwUsage
 
 ----------------------------------------
-
-{-
-newtype ConfigNames = ConfigNames { unConfigNames :: NonEmpty ConfigName }
-  deriving (Semigroup)
--}
 
 newtype ConfigNames = ConfigNames { unConfigNames :: [ConfigName] }
   deriving (Monoid, Semigroup)
@@ -239,13 +254,6 @@ instance Printable ConfigNames where
 instance TextualPlus ConfigNames where
   textual' = ConfigNames ⊳ {- sepByNonEmpty -} sepBy1 textual' (text ",")
 
-{-
-instance Semigroup ConfigNames where
-  (ConfigNames x) <> (ConfigNames y) = ConfigNames (x <> y)
-
-instance Monoid ConfigNames where
--}
-
 {-| cmdline options parser -}
 parseOptions ∷ Parser Options
 parseOptions =
@@ -253,6 +261,8 @@ parseOptions =
     configs_option ∷ Parser [ConfigName] =
       unConfigNames ∘ ю ⊳ (many $ option @ConfigNames (eitherReader parseTextual) (ю [ short 'c', long "config"
                                    , help "select config to use" ]))
+    configs_option' ∷ Parser Configs =
+      ( SomeConfigs ⊳ configs_option ∤ flag' AllConfigs (ю [short 'A', long "all-configs"])  )
     config_option ∷ Parser ConfigName =
       (option @ConfigName (eitherReader parseTextual) (ю [ short 'c', long "config"
                                              , help "select config to use" ]))
@@ -264,17 +274,24 @@ parseOptions =
                                                   , help "all packages" ])))
 
   in
-    Options ⊳ subparser
-    (ю [ {- command "list-packages"    (info (ModeListPkgs ⊳
-                                           optional config_option)
-                                     (progDesc "list packages"))
-FIXME
-       , -} command "list-config-dirs" (info (pure ModeListConfigs)
-                                     (progDesc "list config directories"))
-       , command "install"          (info install_parser
-                                     (progDesc "install one or more packages")
-                                    )
-       ])
+    Options ⊳ ( flag FullyConnected Remote
+                     (ю [ short 'r', long "remote"
+                        , help "disconnected from sixears network" ])
+              ∤ flag' Isolated (ю [ short 'R', long "isolated"
+                                  , help "disconnected from all networks" ]))
+            ⊵ subparser (ю [ command "list-config-dirs"
+                                     (info (pure ModeListConfigs)
+                                      (progDesc "list config directories"))
+                           , command "list-config-names"
+                                     (info (pure ModeListConfigNames)
+                                      (progDesc "list config names"))
+                           , command "list-packages"
+                                     (info (ModeListPkgs ⊳ configs_option')
+                                      (progDesc "list packages"))
+                           , command "install"
+                                     (info install_parser
+                                      (progDesc "install one or more packages"))
+                           ])
 
 ------------------------------------------------------------
 
@@ -295,6 +312,9 @@ configDir p = ConfigDir ⊳ ((⫻ fromList [unConfigName p]) ⊳ configTop)
 configDefault ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
                 μ ConfigDir
 configDefault = ConfigDir ⊳ ((⫻ [reldir|default/|]) ⊳ configTop)
+
+configDefault' ∷ ConfigName
+configDefault' = ConfigName [pc|default|]
 
 ----------------------------------------
 
@@ -326,18 +346,34 @@ allConfigDirs = do
         return $ any (\ (fn, _) → [relfile|flake.nix|] ≡ basename fn) fs
   subdirs Informational config_top NoMock ≫ filterM has_flake
 
+
 ----------------------------------------
 
-namePkgVers ∷ FlakePkgs → [(𝕋,𝕋,𝕋)]
+allConfigNames ∷ (MonadIO μ,
+                  HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ,
+                  AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ) ⇒
+                 μ [ConfigName]
+allConfigNames = basePC ⊳⊳ allConfigDirs
+  where basePC ∷ AbsDir → ConfigName
+        basePC dir = case lastMay ∘ otoList $ basename dir of
+                        𝕹   → error $ [fmt|could not find ConfigName of %T|] dir
+                        𝕵 p → ConfigName p
+
+----------------------------------------
+
+namePkgVers ∷ FlakePkgs → [(𝕋,𝕋,𝕋,𝕋)]
 namePkgVers pkgs =
   let
     pkgVer ∷ FlakePkg → (𝕋,𝕋)
     pkgVer fp = (toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver)
 
-    pfx ∷ α → (β,γ) → (α,β,γ)
-    pfx x (y,z) = (x,y,z)
+    annotate ∷ α → δ → (β,γ) → (α,β,γ,δ)
+    annotate x w (y,z) = (x,y,z,w)
+
+    x86_64 = pkgs ⊣ x86_64_
+    loc = toText $ pkgs ⊣ location
   in
-    Map.foldMapWithKey (\ p fp → [pfx (toText p) (pkgVer fp)]) $ pkgs ⊣ x86_64_
+    Map.foldMapWithKey (\ p fp → [annotate (toText p) loc (pkgVer fp)]) x86_64
 
 ----------------------------------------
 
@@ -376,15 +412,6 @@ configDirFromAbs f = do
 
 ----------------------------------------
 
-nixDo ∷ ∀ ε δ φ μ . (MonadIO μ, Foldable φ, MonadReader δ μ, HasDoMock δ,
-                     AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                     AsProcExitError ε, Printable ε,
-                     MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-        φ 𝕋 → μ ()
-nixDo args = snd ⊳ ꙩ (Paths.nix, toList args)
-
-----------------------------------------
-
 mkTargets ∷ (Functor φ, Printable τ) ⇒ ConfigDir → φ τ → φ 𝕋
 mkTargets config_dir attr_paths =
   [fmt|%T#%T|] (unConfigDir config_dir) ⊳ attr_paths
@@ -417,8 +444,8 @@ nixBuild ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
 nixBuild config_dir attr_paths = do
   msg "building" config_dir attr_paths
   let targets = mkTargets config_dir attr_paths
-  nixDo $ [ "build", "--log-format", "bar-with-logs", "--no-link" ] ⊕
-          (toList targets)
+  nixDo 𝕹 $ [ "build", "--log-format", "bar-with-logs", "--no-link" ] ⊕
+             (toList targets)
 
 ----------------------------------------
 
@@ -430,8 +457,8 @@ nixProfileRemove ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ
 nixProfileRemove _ [] = return ()
 nixProfileRemove profile attr_paths = do
   msg "removing" profile attr_paths
-  nixDo $ ["profile", "remove", "--verbose", "--profile", toText profile] ⊕
-          (toText ⊳ attr_paths)
+  nixDo 𝕹 $ ["profile", "remove", "--verbose", "--profile", toText profile] ⊕
+             (toText ⊳ attr_paths)
 
 ----------------------------------------
 
@@ -443,8 +470,8 @@ nixProfileInstall ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock �
 nixProfileInstall config_dir profile attr_paths = do
   msg "installing" ([fmtT|%T→%T|] config_dir profile) attr_paths
   let targets = mkTargets config_dir attr_paths
-  nixDo $ [ "profile", "install", "--profile", toText profile ] ⊕
-          (toList targets)
+  nixDo 𝕹 $ [ "profile", "install", "--profile", toText profile ] ⊕
+             (toList targets)
 
 ----------------------------------------
 
@@ -468,57 +495,37 @@ checkPackages ∷ ∀ ε α μ .
                  Printable ε, MonadError ε μ) ⇒
                 (ConfigDir → ProfileDir → NonEmpty AttrPath → μ ())
               → (ConfigDir → ProfileDir → NonEmpty AttrPath → μ α)
-              → [ConfigName] → Packages → μ Word8
-checkPackages check go [] pkgs = checkPackages check go [ConfigName [pc|default|]] pkgs
-checkPackages check go [c] pkgs = do
+              → RemoteState → [ConfigName] → Packages → μ Word8
+checkPackages check go r [] pkgs = checkPackages check go r [configDefault'] pkgs
+checkPackages check go r [c] pkgs = do
   config_dir     ← {- maybe configDefault -} configDirFromAbs c
   target_profile ← nixProfileAbsDir (toText $ unConfigName c)
 
-  targets ∷ [(ConfigDir,ProfileDir,NonEmpty AttrPath)] ← collectPackages [c] pkgs
+  targets ∷ [(ConfigDir,ProfileDir,NonEmpty AttrPath)] ←
+    collectPackages r [c] pkgs
   -- we split into 'check' and 'go' so that we can do pre-emptively make all the
   -- necessary checks before making any destructive changes
   forM_ targets (\ (cd,pd,aps) → check cd pd aps)
   forM_ targets (\ (cd,pd,aps) → go cd pd aps)
   return 0
-checkPackages check go cs pkgs =
+checkPackages check go r cs pkgs =
   traceShow ("cs", cs) $
   error $ [fmt|%L|] cs
-
-{-
-  flkPkgs ∷ FlakePkgs ← flakeShow' config_dir
-
-  pkgs' ∷ NonEmpty Pkg ← case pkgs of
-            SomePackages ps → return ps
-            AllPackages →
-              case nonEmpty $ x86_64_pkgs flkPkgs of
-                𝕹    → throwUserError $ [fmtT|no packages found: %T|] config_dir
-                𝕵 ps → return ps
-  partitionMaybes ∘ toList ⊳ pkgFindNames' flkPkgs pkgs' ≫ \ case
-    (missing:[],_) →
-      throwUsage $ [fmtT|package not found: %T|] missing
-    (missing@(_:_:_),_) →
-      throwUsage $ [fmtT|packages not found: %L|] missing
-    ([],pkgs'') → case nonEmpty (snd ⊳ pkgs'') of
-                    𝕵 attr_paths → f config_dir target_profile attr_paths
-                    𝕹 →
-                      throwUsage $ ("internal error: nonEmpty pkgs' means " ∷ 𝕋)
-                                 ⊕ "this should never happen"
--}
 
 collectPackages ∷ ∀ ε ψ μ .
                   (MonadIO μ, Traversable ψ, MonadLog (Log MockIOClass) μ,
                    AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
                    AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
                    Printable ε, MonadError ε μ) ⇒
-                  ψ ConfigName → Packages
+                  RemoteState → ψ ConfigName → Packages
                 → μ (ψ (ConfigDir, ProfileDir, NonEmpty AttrPath))
 
-collectPackages cs pkgs =
+collectPackages r cs pkgs =
   forM cs (\ c → do
     config_dir     ← configDirFromAbs c
     target_profile ← nixProfileAbsDir (toText $ unConfigName c)
 
-    flkPkgs ∷ FlakePkgs ← flakeShow' config_dir
+    flkPkgs ∷ FlakePkgs ← flakeShow' r config_dir
 
     pkgs' ∷ NonEmpty Pkg ← case pkgs of
               SomePackages ps → return ps
@@ -577,18 +584,25 @@ mainInstall config_dir target_profile attr_paths = do
 
 ----------------------------------------
 
+(⮞) ∷ (Monad η, Traversable ψ) ⇒ (α → η β) → ψ α → η (ψ β)
+(⮞) = mapM
+
 {-| List all the packages from a given flake -}
 mainListPkgs ∷ (MonadIO μ, MonadReader δ μ, HasDoMock δ,
                 AsAesonError ε, AsProcExitError ε, AsCreateProcError ε,
                 AsFPathError ε, AsIOError ε, Printable ε,
                 MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-               𝕄 ConfigName → μ Word8
-mainListPkgs c = do
-  config_dir ← maybe configDefault configDirFromAbs c
-  xs ∷ [(𝕋,𝕋,𝕋)] ← namePkgVers ⊳ flakeShow config_dir
+               RemoteState → Configs → μ Word8
+mainListPkgs r AllConfigs = allConfigNames ≫ mainListPkgs r ∘ SomeConfigs
+mainListPkgs r (SomeConfigs []) = mainListPkgs r (SomeConfigs [configDefault'])
+mainListPkgs r (SomeConfigs cs) = do
+  config_dirs ∷ [ConfigDir] ← mapM configDirFromAbs cs
+  xs ∷ [(𝕋,𝕋,𝕋,𝕋)] ← sortOn (view _1) ⊳ ю ⊳ (namePkgVers ⊳⊳ (flakeShow r ⮞ config_dirs))
+-- add config name/dir here
+
   let xs' = tupleToList ⊳ xs
-  forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight] xs')
-        (say ∘ intercalate "\t")
+  forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight, JustifyLeft] xs')
+                (say ∘ intercalate "\t")
   return 0
 
 ----------------------------------------
@@ -598,13 +612,20 @@ myMain ∷ (HasCallStack, AsNixError ε, AsIOError ε,AsFPathError ε,AsAesonErr
           AsUsageError ε, Printable ε) ⇒
          DoMock → Options → LoggingT (Log MockIOClass) (ExceptT ε IO) Word8
 myMain do_mock opts = flip runReaderT do_mock $
-  case mode opts of
-    ModeListConfigs  → allConfigDirs ≫ mapM_ say ⪼ return 0
-    ModeListPkgs c   → mainListPkgs c
-    ModeInstall cs ps →
-      -- test build all the packages before we make any destructive changes to
-      -- the profile
-      checkPackages (\ cd _ aps → nixBuild cd aps) mainInstall cs ps
+  let
+    r = remote_state opts
+  in
+    case mode opts of
+    -- support -A for list-packages (list from all configs)
+    -- support -A for install
+    -- or -C?
+      ModeListConfigs     → allConfigDirs ≫ mapM_ say ⪼ return 0
+      ModeListConfigNames → allConfigNames ≫ mapM_ say ∘ sort ⪼ return 0
+      ModeListPkgs cs     → mainListPkgs r cs
+      ModeInstall cs ps   →
+        -- test build all the packages before we make any destructive changes to
+        -- the profile
+        checkPackages (\ cd _ aps → nixBuild cd aps) mainInstall r cs ps
 
 {-| program main entry point -}
 main ∷ MonadIO μ ⇒ μ ()
