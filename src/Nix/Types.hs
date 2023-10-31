@@ -30,11 +30,12 @@ import Data.Aeson ( FromJSON, FromJSONKey )
 
 -- base --------------------------------
 
-import Data.Char ( isAlpha, isAlphaNum )
-import Data.List ( intercalate )
-import Data.Ord  ( Ord(compare) )
-import GHC.Exts  ( IsString(fromString) )
-import Text.Read ( read )
+import Control.Monad.Fail ( MonadFail )
+import Data.Char          ( isAlpha, isAlphaNum )
+import Data.List          ( intercalate )
+import Data.Ord           ( Ord(compare) )
+import GHC.Exts           ( IsString(fromString) )
+import Text.Read          ( read )
 
 -- deepseq -----------------------------
 
@@ -188,25 +189,14 @@ instance Printable (ConfigDir,ProfileDir) where
 
 ------------------------------------------------------------
 
-pkgRE ∷ CharParsing η ⇒ η (Pkg, 𝕄 Ver)
+pkgRE ∷ (CharParsing η, MonadFail η) ⇒ η (Pkg, 𝕄 Ver)
 pkgRE =
   let
-    alpha_under_score      ∷ CharParsing η ⇒ η ℂ
-    alpha_under_score      = satisfy (\ c → isAlpha c ∨ c ≡ '_')
-    non_hyphen             ∷ CharParsing η ⇒ η ℂ
-    non_hyphen             = satisfy (\ c → isAlphaNum c ∨ c ∈ "_.")
-    simple_identifier      ∷ CharParsing η ⇒ η 𝕊
-    simple_identifier      = (:) ⊳ alpha_under_score ⊵ many non_hyphen
-    hyphenated_identifiers ∷ CharParsing η ⇒ η 𝕊
-    hyphenated_identifiers =
-      intercalate "-" ⊳ ((:) ⊳ simple_identifier
-                             ⊵ many (try $ char '-' ⋫ simple_identifier))
     numeric_identifier     ∷ CharParsing η ⇒ η 𝕊
     numeric_identifier     =
       (:) ⊳ digit ⊵ many (satisfy (\ c → isAlphaNum c ∨ c ∈ "-_."))
-    fromStr p v = (fromString p, fromString ⊳ v)
   in
-    (fromStr ⊳ hyphenated_identifiers ⊵ optional (char '-' ⋫ numeric_identifier))
+    ((,) ⊳ textual' ⊵ optional (char '-' ⋫ (fromString ⊳ numeric_identifier)))
 
 ----------------------------------------
 

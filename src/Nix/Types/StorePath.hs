@@ -15,8 +15,9 @@ import Base1T
 
 -- base --------------------------------
 
-import Data.Char ( isAlpha, isAlphaNum )
-import GHC.Exts  ( fromString )
+import Control.Monad.Fail ( MonadFail )
+import Data.Char          ( isAlpha, isAlphaNum )
+import GHC.Exts           ( fromString )
 
 -- fpath -------------------------------
 
@@ -71,7 +72,7 @@ data StorePath = StorePath { _path' :: AbsDir
 
    return hash, pkg, (maybe) ver
 -}
-storePathRE ∷ CharParsing η ⇒ η (Hash, Pkg, 𝕄 Ver)
+storePathRE ∷ (CharParsing η, MonadFail η) ⇒ η (Hash, Pkg, 𝕄 Ver)
 storePathRE =
   let
     _pkgRE ∷ CharParsing η ⇒ η (𝕊, 𝕄 𝕊)
