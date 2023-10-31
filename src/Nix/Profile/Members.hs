@@ -69,18 +69,20 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError,
 ------------------------------------------------------------
 
 import Nix.Profile.Manifest ( elementsi, readManifest )
-import Nix.Types.Manifest   ( Manifest, getNameVerPath )
+import Nix.Types.Manifest   ( Manifest, getNameVerPathPrio )
 
 --------------------------------------------------------------------------------
 
 data ShowVersion = ShowVersion | NoShowVersion
 data ShowIndex = ShowIndex | NoShowIndex
 data ShowPath = ShowPath | NoShowPath
+data ShowPriority = ShowPriority | NoShowPriority
 
-data Options = Options { showVersion :: ShowVersion
-                       , showIndex   :: ShowIndex
-                       , showPath    :: ShowPath
-                       , profileName :: 𝕄 𝕋
+data Options = Options { showVersion  :: ShowVersion
+                       , showIndex    :: ShowIndex
+                       , showPath     :: ShowPath
+                       , showPriority :: ShowPriority
+                       , profileName  :: 𝕄 𝕋
                        }
 
 ----------------------------------------
@@ -89,15 +91,18 @@ parseOptions ∷ Parser Options
 parseOptions =
   let version_help  = "show version information, too"
       path_help     = "show store path, too"
+      priority_help = "show priority, too"
       no_index_help = "don't show profile position indices"
-  in  Options ⊳ flag NoShowVersion ShowVersion (ю [ short 'v', long "version"
-                                                  , help version_help ])
-              ⊵ flag ShowIndex     NoShowIndex (ю [ short 'n', long "no-index"
-                                                  , help no_index_help ])
-              ⊵ flag NoShowPath    ShowPath    (ю [ short 'p', long "path"
-                                                  , help path_help ])
+  in  Options ⊳ flag NoShowVersion  ShowVersion  (ю [ short 'V', long "version"
+                                                    , help version_help ])
+              ⊵ flag ShowIndex      NoShowIndex  (ю [ short 'n', long "no-index"
+                                                    , help no_index_help ])
+              ⊵ flag NoShowPath     ShowPath     (ю [ short 'P', long "path"
+                                                    , help path_help ])
+              ⊵ flag NoShowPriority ShowPriority (ю [ short 'R', long "priority"
+                                                    , help path_help ])
               ⊵ optional (strArgument (ю [ metavar "PROFILE-NAME"
-                                         , help "profile to enumerate" ]))
+                                         , help priority_help ]))
 
 ------------------------------------------------------------
 
@@ -106,22 +111,25 @@ output_data options manifest =
   let pShow ∷ Show α ⇒ α → IO ()
       pShow = hPutStrLn stderr ∘ show
 
-      get_columns i n v p = ю [ case showIndex options of
-                                  ShowIndex   → [pack $ show i]
-                                  NoShowIndex → []
-                              , [toText n]
-                              , case showVersion options of
-                                  ShowVersion   → [maybe "" toText v]
-                                  NoShowVersion → []
-                              , case showPath options of
-                                  ShowPath   → [toText p]
-                                  NoShowPath → []
-                              ]
+      get_columns i n v p r = ю [ case showIndex options of
+                                    ShowIndex   → [pack $ show i]
+                                    NoShowIndex → []
+                                , [toText n]
+                                , case showVersion options of
+                                    ShowVersion   → [maybe "" toText v]
+                                    NoShowVersion → []
+                                , case showPath options of
+                                    ShowPath   → [toText p]
+                                    NoShowPath → []
+                                , case showPriority options of
+                                    ShowPriority   → [toText r]
+                                    NoShowPriority → []
+                                ]
 
       print_name_ver (i,e) = do
-        case getNameVerPath @TextualParseError e of
-          𝕷 err     → pShow err
-          𝕽 (n,v,p) → putStrLn (intercalate "\t" $ get_columns i n v p)
+        case getNameVerPathPrio @TextualParseError e of
+          𝕷 err       → pShow err
+          𝕽 (n,v,p,r) → putStrLn (intercalate "\t" $ get_columns i n v p r)
 
   in forM_ (elementsi manifest) print_name_ver
 

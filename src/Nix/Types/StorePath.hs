@@ -103,12 +103,13 @@ instance Printable StorePath where
 instance TextualPlus StorePath where
   textual' = do
     let construct p h v =
-          either (unexpected ∘ toString) pure $ parseAbsDirP @FPathError @_ @(𝔼 _) $
-            ю [ "/nix/store/"
-               , (unHash h)
-               , "-", (unPkg p)
-               , maybe "" ("-" ⊕) ((unVer) ⊳ v)
-               ]
+          either (unexpected ∘ toString) pure $
+            parseAbsDirP @FPathError @_ @(𝔼 _) $
+              ю [ "/nix/store/"
+                 , (unHash h)
+                 , "-", (unPkg p)
+                 , maybe "" ("-" ⊕) ((unVer) ⊳ v)
+                 ]
     (h,p,v) ← storePathRE
     t ← construct p h v
     return (StorePath t h p v)

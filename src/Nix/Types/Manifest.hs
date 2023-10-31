@@ -6,7 +6,7 @@ module Nix.Types.Manifest
   , ManifestElement
   , attrPath
   , elements
-  , getNameVerPath
+  , getNameVerPathPrio
   , location
   , readManifestFile
   , version
@@ -68,7 +68,7 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError,
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Types           ( Pkg, Ver )
+import Nix.Types           ( Pkg, Priority, Ver )
 import Nix.Types.AttrPath  ( AttrPath, apPkg )
 import Nix.Types.StorePath ( spPkgVerPath )
 
@@ -76,7 +76,7 @@ import Nix.Types.StorePath ( spPkgVerPath )
 
 {-| An individual element of a profile manifest -}
 data ManifestElement = ManifestElement { active      :: 𝔹
-                                       , priority    :: ℕ
+                                       , priority    :: Priority
                                        , storePaths  :: NonEmpty 𝕋
                                        , attrPath    :: 𝕄 AttrPath
                                        , originalURL :: 𝕄 𝕋
@@ -121,21 +121,22 @@ readManifestFile sev f = do
 
 instance Printable Manifest where
   print m =
-    let getName e = case getNameVerPath @TextualParseError e of
-                      𝕷 err     → toText err
-                      𝕽 (p,_,_) → toText p
+    let getName e = case getNameVerPathPrio @TextualParseError e of
+                      𝕷 err       → toText err
+                      𝕽 (p,_,_,_) → toText p
 
     in  P.text $ [fmt|manifest: %L|] [ getName e | e ← elements m ]
 
 ----------------------------------------
 
 {-| extract the name, version & path from @ManifestElement@ -}
-getNameVerPath ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η) ⇒
-                 ManifestElement → η (Pkg, 𝕄 Ver, AbsDir)
-getNameVerPath e = do
-  (pkgs,ver,path) ← spPkgVerPath ⊳ tparse (NonEmpty.head $ storePaths e)
+getNameVerPathPrio ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η) ⇒
+                     ManifestElement → η (Pkg, 𝕄 Ver, AbsDir, Priority)
+getNameVerPathPrio e = do
+  (pkgs,ver,path) ← spPkgVerPath ⊳ tparse(NonEmpty.head $ storePaths e)
+  let prio = priority e
   case attrPath e of
-    𝕵 ap → (,ver,path) ⊳ apPkg (toText ap)
-    𝕹    → return (pkgs,ver,path)
+    𝕵 ap → (,ver,path,prio) ⊳ apPkg (toText ap)
+    𝕹    → return (pkgs,ver,path,prio)
 
 -- that's all, folks! ----------------------------------------------------------

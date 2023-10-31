@@ -81,7 +81,7 @@ import Nix.Profile        ( nixProfileAbsDir )
 import Nix.Types          ( Pkg, ProfileDir(unProfileDir) )
 import Nix.Types.AttrPath ( AttrPath )
 import Nix.Types.Manifest ( Manifest, ManifestElement, attrPath, elements,
-                            getNameVerPath, location, readManifestFile )
+                            getNameVerPathPrio, location, readManifestFile )
 
 --------------------------------------------------------------------------------
 
@@ -139,7 +139,7 @@ elementsi m = zip [0..] (elements m)
 findPkgs ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η)⇒
            Pkg → Manifest → η [ℕ]
 findPkgs p m = do
-  pkgs ← sequence [ view _1 ⊳ getNameVerPath e | e ← elements m ]
+  pkgs ← sequence [ view _1 ⊳ getNameVerPathPrio e | e ← elements m ]
   return $ fromIntegral ⊳ elemIndices p pkgs
 
 findPkg_ ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η)⇒

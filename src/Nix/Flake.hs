@@ -2,10 +2,11 @@
 module Nix.Flake
   ( FlakePkg
   , FlakePkgs
+  , HasArchFlakePkgMap(archMap)
   , flakePkgMap
   , flakePkgMap'
   , flakeShow
-  , flakeShow'
+  , flakeShowNM
   , forMX86_64Pkg
   , forMX86_64Pkg_
   , forX86_64Pkg
@@ -13,6 +14,7 @@ module Nix.Flake
   , pkg
   , pkgFindNames
   , pkgFindNames'
+  , priority
   , tests
   , ver
   , x86_64
@@ -22,6 +24,8 @@ module Nix.Flake
 
 import Base1T
 
+
+import Prelude ( undefined )
 
 -- aeson -------------------------------
 
@@ -35,10 +39,13 @@ import Data.Aeson.Error ( AsAesonError, throwAsAesonError )
 
 -- base --------------------------------
 
-import Data.Function ( flip )
-import Data.Maybe    ( catMaybes, fromMaybe )
-import Data.Tuple    ( uncurry )
-import GHC.Generics  ( Generic )
+import Control.Monad      ( foldM )
+import Control.Monad.Fail ( MonadFail(fail) )
+import Data.Function      ( flip )
+import Data.Maybe         ( catMaybes, fromMaybe )
+import Data.Monoid        ( Monoid )
+import Data.Tuple         ( uncurry )
+import GHC.Generics       ( Generic )
 
 -- containers --------------------------
 
@@ -50,11 +57,14 @@ import FPath.AbsFile          ( AbsFile )
 import FPath.AppendableFPath  ( (⫻) )
 import FPath.AsFilePath       ( filepath )
 import FPath.Error.FPathError ( AsFPathError )
+import FPath.File             ( File, FileAs(_File_) )
 import FPath.RelFile          ( relfile )
 
 -- lens --------------------------------
 
-import Control.Lens.At ( at )
+import Control.Lens.At     ( at )
+import Control.Lens.Getter ( view )
+import Control.Lens.Tuple  ( _2 )
 
 -- log-plus ----------------------------
 
@@ -62,7 +72,7 @@ import Log ( Log )
 
 -- logging-effect ----------------------
 
-import Control.Monad.Log ( MonadLog )
+import Control.Monad.Log ( MonadLog, Severity(Notice) )
 
 -- mockio ------------------------------
 
@@ -70,21 +80,34 @@ import MockIO.DoMock ( DoMock(NoMock) )
 
 -- mockio-log --------------------------
 
-import MockIO.Log ( HasDoMock, MockIOClass )
+import MockIO.IOClass ( HasIOClass, IOClass(IORead, IOWrite) )
+import MockIO.Log     ( HasDoMock, MockIOClass )
 
 -- mockio-plus -------------------------
 
+import MockIO.OpenFile          ( readFileY )
 import MockIO.Process.MLCmdSpec ( MLCmdSpec, mock_value )
 
 -- monadio-plus ------------------------
 
 import MonadIO.Error.CreateProcError ( AsCreateProcError )
 import MonadIO.Error.ProcExitError   ( AsProcExitError )
+import MonadIO.NamedHandle           ( HGetContents(hGetContents),
+                                       HWriteContents(hWriteContents), ℍ,
+                                       impliedEncoding, impliedEncodingM )
 import MonadIO.Process.ExitStatus    ( ExitStatus, evOK )
+
+-- more-unicode ------------------------
+
+import Data.MoreUnicode.Lens ( (⊩) )
 
 -- mtl ---------------------------------
 
 import Control.Monad.Reader ( MonadReader, runReaderT )
+
+-- parsers -----------------------------
+
+import Text.Parser.Char ( char )
 
 -- text --------------------------------
 
@@ -97,7 +120,9 @@ import Text.Printer qualified as P
 
 -- textual-plus ------------------------
 
-import TextualPlus qualified
+import TextualPlus                         ( PrintOut, TextualPlus(textual'),
+                                             parseT, parseTextual, tparse )
+import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 
 ------------------------------------------------------------
 --                     local imports                      --
@@ -107,8 +132,9 @@ import Nix                ( nixDo )
 import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
                             throwAsNixDuplicatePkgError,
                             throwAsNixErrorDuplicatePkg )
-import Nix.Types          ( Arch, ConfigDir(unConfigDir), Pkg, RemoteState, Ver,
-                            pkgRE, remoteArgs, x86_64Linux )
+import Nix.Types          ( Arch, ConfigDir(unConfigDir), Pkg, Priority,
+                            RemoteState, Ver, pkgRE, remoteArgs, unPriority,
+                            x86_64Linux )
 import Nix.Types.AttrPath ( AttrPath, mkAttrPath )
 
 --------------------------------------------------------------------------------
@@ -117,6 +143,9 @@ data FlakePkg = FlakePkg { _description :: 𝕄 𝕋
                          , _pkg         :: Pkg
                          , _ver         :: 𝕄 Ver
                          , _type        :: 𝕋
+                           -- priority isn't really in the flake, it's in our
+                           -- own flake.priorities
+                         , _priority    :: 𝕄 Priority
                          }
   deriving (Eq, Generic, Show)
 
@@ -126,6 +155,9 @@ pkg = lens _pkg (\ fp p → (fp { _pkg = p }))
 ver ∷ Lens' FlakePkg (𝕄 Ver)
 ver = lens _ver (\ fp v → (fp { _ver = v }))
 
+priority ∷ Lens' FlakePkg (𝕄 Priority)
+priority = lens _priority (\ fp p → (fp { _priority = p }))
+
 pkgVer ∷ FlakePkg → 𝕋
 pkgVer f =
   let p = toText $ f ⊣ pkg
@@ -134,12 +166,15 @@ pkgVer f =
         𝕵 v → [fmt|%t-%T|] p v
 
 instance FromJSON FlakePkg where
-  parseJSON = withObject "FlakePkg" $
+  parseJSON =
+    withObject "FlakePkg" $
     \ v → do
           name ← v .: "name"
-          (p,vers) ← TextualPlus.parseT pkgRE "FlakePkg" (unpack name)
+          (p,vers) ← parseT pkgRE "FlakePkg" (unpack name)
           FlakePkg ⊳ v .:? "description" ⊵ return p ⊵ return vers ⊵ v .: "type"
-
+                   -- when reading the flake show output, priority is always 𝕹
+                   -- as we read this from flake.priorities
+                   ⊵ pure 𝕹
 instance Printable FlakePkg where
   print = P.text ∘ pkgVer
 
@@ -147,7 +182,7 @@ instance Printable FlakePkg where
 
 type Map = Map.Map
 
-newtype FlakePkgs' = FlakePkgs' (Map Arch (Map Pkg FlakePkg))
+newtype FlakePkgs' = FlakePkgs' { unFlakePkgs' :: Map Arch (Map Pkg FlakePkg) }
   deriving (Eq, Generic, Show)
 
 instance FromJSON FlakePkgs' where
@@ -161,8 +196,18 @@ instance FromJSON FlakePkgs' where
     in -} FlakePkgs' ⊳ v .: "packages"
 
 
-unFlakePkgs_ ∷ FlakePkgs' → Map Arch (Map Pkg FlakePkg)
-unFlakePkgs_ (FlakePkgs' m) = m
+class HasArchFlakePkgMap α where
+  archMap ∷ Lens' α (Map Arch (Map Pkg FlakePkg))
+
+instance HasArchFlakePkgMap (Map Arch (Map Pkg FlakePkg)) where
+  archMap = id
+
+instance HasArchFlakePkgMap FlakePkgs' where
+  archMap = lens unFlakePkgs' (\ _ m → FlakePkgs' m)
+
+updatePriorities' ∷ PkgPriorities → FlakePkgs' → FlakePkgs'
+updatePriorities' pkgprios (FlakePkgs' fps) =
+  FlakePkgs' (Map.map (Map.map undefined) fps)
 
 --------------------
 
@@ -173,6 +218,13 @@ data FlakePkgs = FlakePkgs { _location :: ConfigDir
 
 location ∷ Lens' FlakePkgs ConfigDir
 location = lens _location (\ fp l → fp { _location = l })
+
+packages ∷ Lens' FlakePkgs (Map.Map Arch (Map.Map Pkg FlakePkg))
+packages = lens (unFlakePkgs' ∘ _packages)
+                (\ p f → (p { _packages = FlakePkgs' f }))
+
+instance HasArchFlakePkgMap FlakePkgs where
+  archMap = packages ∘ archMap
 
 instance Printable FlakePkgs where
   print fp =
@@ -185,14 +237,21 @@ instance Printable FlakePkgs where
 
 ----------------------------------------
 
-packages ∷ Lens' FlakePkgs (Map.Map Arch (Map.Map Pkg FlakePkg))
-packages = lens (unFlakePkgs_ ∘ _packages)
-                (\ p f → (p { _packages = FlakePkgs' f }))
+updatePriorities ∷ PkgPriorities → FlakePkgs → FlakePkgs
+updatePriorities (PkgPriorities pps) fps =
+  let go ∷ (Pkg,Priority) → FlakePkgs → FlakePkgs
+      go (p,y) fpkgs = fpkgs & packages ⊧ Map.map (Map.adjust(& priority ⊩ y) p)
+  in  foldr go fps (Map.toList pps)
 
 ----------------------------------------
 
 locFile ∷ FlakePkgs → AbsFile
 locFile fp = (unConfigDir $ _location fp) ⫻ [relfile|flake.nix|]
+
+----------------------------------------
+
+priosFile ∷ ConfigDir → AbsFile
+priosFile fp = (unConfigDir fp) ⫻ [relfile|flake.priorities|]
 
 ----------------------------------------
 
@@ -204,7 +263,7 @@ x86_64_ = go x86_64Linux
   where go ∷ Arch → Lens' FlakePkgs (Map.Map Pkg FlakePkg)
         go a =
           let pkgs ∷ Lens' FlakePkgs (Map.Map Arch (Map.Map Pkg FlakePkg))
-              pkgs = lens (unFlakePkgs_ ∘ _packages)
+              pkgs = lens (unFlakePkgs' ∘ _packages)
                           (\ p f → (p { _packages = FlakePkgs' f }))
               f1 ∷ Map.Map Arch (Map.Map Pkg FlakePkg) → Map.Map Pkg FlakePkg
               f1 fps = fromMaybe Map.empty $ a `Map.lookup` fps
@@ -321,18 +380,21 @@ flakeShowTestMap = fromList [ ("binutils",
                                         , _pkg = "binutils-wrapper"
                                         , _ver = Just "2.38"
                                         , _type = "derivation"
+                                        , _priority = 𝕹
                                         })
                             , ("get-iplayer-config",
                                FlakePkg { _description = 𝕹
                                         , _pkg = "get-iplayer-config"
                                         , _ver = 𝕹
                                         , _type = "derivation"
+                                        , _priority = 𝕹
                                         })
                             , ("graph-easy",
                                FlakePkg { _description = 𝕵 "MOCK MOCKETY MOCK"
                                         , _pkg = "perl5.34.1-Graph-Easy"
                                         , _ver = 𝕵 "0.76"
                                         , _type = "derivation"
+                                        , _priority = 𝕹
                                         })
                             ]
 
@@ -342,8 +404,9 @@ flakeShowTestMap = fromList [ ("binutils",
 flakeShow ∷ ∀ ε δ μ .
             (MonadIO μ, HasDoMock δ, MonadReader δ μ,
              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-             AsProcExitError ε, AsAesonError ε, Printable ε,
-             MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
+             AsTextualParseError ε, AsProcExitError ε, AsAesonError ε,
+             Printable ε, MonadError ε μ,
+             MonadLog (Log MockIOClass) μ) ⇒
             RemoteState → ConfigDir → μ FlakePkgs
 flakeShow r d = do
   let eAsAesonError ∷ (Printable τ,AsAesonError ε,MonadError ε η) ⇒ 𝔼 τ β → η β
@@ -356,18 +419,21 @@ flakeShow r d = do
                    , [ pack $ (unConfigDir d) ⫥ filepath ] ]
 --  (_,flake_show) ← ꙩ (Paths.nix, args, [ӭ (ә "NIX_CONFIG")], mock_set)
   flake_show ← nixDo (𝕵 mock_set) args
-  eAsAesonError (FlakePkgs d ⊳ eitherDecodeStrict' (encodeUtf8 flake_show))
+  x ∷ FlakePkgs ← eAsAesonError (FlakePkgs d ⊳ eitherDecodeStrict' (encodeUtf8 flake_show))
+  prios ← readPriorities (priosFile d)
+  return (updatePriorities prios x)
 
 ----------------------------------------
 
-{-| `flakeShow'`, never mock -}
-flakeShow' ∷ ∀ ε μ .
-            (MonadIO μ,
-             AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-             AsProcExitError ε, AsAesonError ε, Printable ε,
-             MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
-            RemoteState → ConfigDir → μ FlakePkgs
-flakeShow' r = flip runReaderT NoMock ∘ flakeShow r
+{-| `flakeShowNM`, never mock -}
+flakeShowNM ∷ ∀ ε μ .
+              (MonadIO μ,
+               AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+               AsProcExitError ε, AsAesonError ε, AsTextualParseError ε,
+               Printable ε, MonadError ε μ,
+               MonadLog (Log MockIOClass) μ) ⇒
+              RemoteState → ConfigDir → μ FlakePkgs
+flakeShowNM r = flip runReaderT NoMock ∘ flakeShow r
 
 ----------------------------------------
 
@@ -396,6 +462,71 @@ flakePkgMap = flakePkgMap_ throwAsNixDuplicatePkgError
 flakePkgMap' ∷ ∀ ε η . (AsNixError ε, MonadError ε η) ⇒
                FlakePkgs → η (Map.Map Pkg 𝕋)
 flakePkgMap' = flakePkgMap_ throwAsNixErrorDuplicatePkg
+
+newtype PkgPriority = PkgPriority { unPkgPriority :: (Pkg, Priority) }
+  deriving (Show)
+
+instance Printable PkgPriority where
+  print (PkgPriority (k,r)) = P.text $ [fmt|%T:%d|] k (unPriority r)
+
+instance TextualPlus PkgPriority where
+  textual' = let tabs = some $ char '\t'
+             in  PkgPriority ⊳ (((,) ⊳ textual' ⋪ tabs ⊵ textual'))
+
+newtype PkgPriorities = PkgPriorities (Map.Map Pkg Priority)
+  deriving (Show)
+
+pkgPrioritiesFromList ∷ MonadFail η ⇒ [PkgPriority] → η PkgPriorities
+pkgPrioritiesFromList pkps =
+  let go ∷ MonadFail η ⇒
+           Map.Map Pkg Priority → PkgPriority → η (Map.Map Pkg Priority)
+      go pps (PkgPriority (p,y)) = case p `Map.lookup` pps of
+                                     𝕹 → return $ Map.insert p y pps
+  in  PkgPriorities ⊳ foldM go Map.empty pkps
+{-
+  let xx ∷ PkgPriority → (Pkg,[Priority])
+      xx = _
+      -- A map from Pkg to all the priorities it's associated with
+      -- (including duplicates)
+      proto_map ∷ Map.Map Pkg [Priority]
+      proto_map = Map.fromListWith _ (xx ⊳ pkps)
+      go pkg [prio] accum =
+        case accum of
+          𝕷 errs → errs
+          𝕽 accum' → case pkg `Map.lookup` accum' of
+                       𝕹   → 𝕽 (_ ∷ Map.Map Pkg Priority)
+                       𝕵 _ → 𝕷 (_ ∷ Map.Map Pkg [Priority])
+      go pkg prios accum =
+        case accum of
+          𝕷 errs → _
+          𝕽 accum' → case pkg `Map.lookup` accum' of
+                       𝕹   → 𝕽 (_ ∷ Map.Map Pkg Priority)
+                       𝕵 _ → 𝕷 (_ ∷ Map.Map Pkg [Priority])
+-- XXX could this be foldMapWithKey?
+  in case Map.foldrWithKey go (return $ Map.empty) proto_map of
+    𝕷 e → fail $ _ e
+    𝕽 r → return $ PkgPriorities r
+-}
+
+instance Printable PkgPriorities where
+  print (PkgPriorities pps) =
+    P.text ∘ intercalate "\n" $ toText ∘ PkgPriority ⊳ Map.toList pps
+
+instance TextualPlus PkgPriorities where
+  -- textual' = pkgPrioritiesFromList ⊳ many (textual' ⋪ char '\n')
+  textual' = many (textual' ⋪ char '\n') ≫ pkgPrioritiesFromList
+
+readPriorities ∷ ∀ ε γ ω μ .
+                 (HasDoMock ω, HasIOClass ω,
+                  Default ω, MonadLog (Log ω) μ, MonadError ε μ, AsIOError ε,
+               AsTextualParseError ε,
+                  FileAs γ, MonadIO μ, Printable ε) ⇒
+                 γ → μ PkgPriorities
+
+readPriorities f =
+  let fmsg ∷ 𝕄 (File → 𝕋)
+      fmsg = 𝕵 [fmt|reading priorities: %T|]
+  in  readFileY @_ @𝕋 Notice fmsg ф f NoMock ≫ tparse ∘ fromMaybe ""
 
 ----------------------------------------
 

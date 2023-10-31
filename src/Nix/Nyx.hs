@@ -24,6 +24,8 @@ import Data.Aeson.Error ( AsAesonError )
 
 -- base --------------------------------
 
+import Data.List.NonEmpty qualified as NonEmpty
+
 import Data.Foldable      ( Foldable )
 import Data.Function      ( flip )
 import Data.Functor       ( Functor )
@@ -63,7 +65,7 @@ import Log ( Log )
 
 -- logging-effect ----------------------
 
-import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational) )
+import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational, Notice) )
 
 -- mockio ------------------------------
 
@@ -72,7 +74,7 @@ import MockIO.IOClass ( HasIOClass )
 
 -- mockio-log --------------------------
 
-import MockIO.Log ( MockIOClass, infoIO, warnIO )
+import MockIO.Log ( MockIOClass, debugIO, infoIO, noticeIO, warnIO )
 
 -- mockio-plus -------------------------
 
@@ -153,12 +155,12 @@ import Nix ( nixDo )
 import Nix.Types.AttrPath qualified as AttrPath
 
 import Nix.Error            ( AsNixError, NixProgramError )
-import Nix.Flake            ( FlakePkg, FlakePkgs, flakeShow, flakeShow',
-                              location, pkg, pkgFindNames', ver, x86_64_,
-                              x86_64_pkgs )
+import Nix.Flake            ( FlakePkg, FlakePkgs, archMap, flakeShow,
+                              flakeShowNM, location, pkg, pkgFindNames', ver,
+                              x86_64_, x86_64_pkgs )
 import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
-import Nix.Types            ( ConfigDir(ConfigDir, unConfigDir),
+import Nix.Types            ( Arch, ConfigDir(ConfigDir, unConfigDir),
                               ConfigName(ConfigName, unConfigName), Pkg(Pkg),
                               ProfileDir,
                               RemoteState(FullyConnected, Isolated, Remote),
@@ -181,9 +183,11 @@ instance HomogenousTuple (α,α,α) where
 
 instance HomogenousTuple (α,α,α,α) where
   type instance TupleItem (α,α,α,α) = α
-  tupleToList (a0,a1,a2,a3
+  tupleToList (a0,a1,a2,a3) = [a0,a1,a2,a3]
 
-              ) = [a0,a1,a2,a3]
+instance HomogenousTuple (α,α,α,α,α) where
+  type instance TupleItem (α,α,α,α,α) = α
+  tupleToList (a0,a1,a2,a3,a4) = [a0,a1,a2,a3,a4]
 
 ------------------------------------------------------------
 
@@ -256,7 +260,7 @@ parseOptions =
                                       , help "select config to use" ]))
 
     configs_option' ∷ Parser Configs =
-      ( SomeConfigs ⊳ configs_option ∤ flag' AllConfigs (ю [short 'A', long "all-configs"])  )
+      ( SomeConfigs ⊳ configs_option ∤ flag' AllConfigs (ю [ short 'A', long "all-configs"] ) )
     install_parser ∷ Parser Mode
     install_parser =
       ModeInstall ⊳ ({- toList ∘ unConfigNames ⊳ -} configs_option)
@@ -348,19 +352,46 @@ allConfigNames = basePC ⊳⊳ allConfigDirs
 
 ----------------------------------------
 
-namePkgVers ∷ FlakePkgs → [(𝕋,𝕋,𝕋,𝕋)]
+class TuplePrepend α β γ where
+  type family TuplePrepended α β
+  tuplePrepend ∷ α → β → γ
+  (⨤) ∷ α → β → γ
+  (⨤) = tuplePrepend
+
+instance ∀ α β γ . TuplePrepend α (β,γ) (α,β,γ) where
+  type instance TuplePrepended α (β,γ) = (α,β,γ)
+  tuplePrepend α (β,γ) = (α,β,γ)
+
+class TupleAppend α β γ where
+  type family TupleAppended α β
+  tupleAppend ∷ α → β → γ
+  (⨦) ∷ α → β → γ
+  (⨦) = tupleAppend
+
+instance ∀ α β γ . TupleAppend (α,β) γ (α,β,γ) where
+  type instance TupleAppended (α,β) γ = (α,β,γ)
+  tupleAppend (α,β) γ = (α,β,γ)
+
+instance ∀ α β γ δ . TupleAppend (α,β,γ) δ (α,β,γ,δ) where
+  type instance TupleAppended (α,β,γ) δ = (α,β,γ,δ)
+  tupleAppend (α,β,γ) δ = (α,β,γ,δ)
+
+instance ∀ α β γ δ κ . TupleAppend (α,β,γ,δ) κ (α,β,γ,δ,κ) where
+  type instance TupleAppended (α,β,γ,δ) κ = (α,β,γ,δ,κ)
+  tupleAppend (α,β,γ,δ) κ = (α,β,γ,δ,κ)
+
+namePkgVers ∷ FlakePkgs → [(𝕋,𝕋,𝕋,𝕋,𝕋)]
 namePkgVers pkgs =
   let
     pkgVer ∷ FlakePkg → (𝕋,𝕋)
     pkgVer fp = (toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver)
 
-    annotate ∷ α → δ → (β,γ) → (α,β,γ,δ)
-    annotate x w (y,z) = (x,y,z,w)
-
-    x86_64 = pkgs ⊣ x86_64_
-    loc = toText $ pkgs ⊣ location
+    go ∷ Pkg → FlakePkg → [(𝕋,𝕋,𝕋,𝕋)]
+    go p fp = [(toText p ⨤ (pkgVer fp) ∷ (𝕋,𝕋,𝕋)) ⨦ toText (pkgs ⊣ location)]
+    go' ∷ Arch → Map.Map Pkg FlakePkg → [(𝕋,𝕋,𝕋,𝕋,𝕋)]
+    go' arch fpmap = (⨦ (toText arch)) ⊳ Map.foldMapWithKey go fpmap
   in
-    Map.foldMapWithKey (\ p fp → [annotate (toText p) loc (pkgVer fp)]) x86_64
+    Map.foldMapWithKey go' (pkgs ⊣ archMap)
 
 ----------------------------------------
 
@@ -405,9 +436,17 @@ mkTargets config_dir attr_paths =
 
 ----------------------------------------
 
+debug' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
+debug' t = asks (view doMock) ≫ \ mock → debugIO mock t
+
 info' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
+                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
 info' t = asks (view doMock) ≫ \ mock → infoIO mock t
+
+notice' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
+notice' t = asks (view doMock) ≫ \ mock → noticeIO mock t
 
 warn' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
@@ -419,7 +458,7 @@ msg ∷ ∀ τ δ φ η . (MonadIO η, Foldable φ, Printable τ, ToBriefText τ
 msg verb object attr_paths = do
   let names = sort $ toText ∘ view AttrPath.pkg ⊳ toList attr_paths
   warn' $ [fmt|%t (%t): %L|] verb (toT object) names
-  info' $ [fmt|%t: (%T) %L|] verb object attr_paths
+  notice' $ [fmt|%t: (%T) %L|] verb object attr_paths
 
 ----------------------------------------
 
@@ -455,8 +494,7 @@ nixProfileInstall ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock �
                               MonadLog (Log MockIOClass) μ) ⇒
                    ConfigDir → ProfileDir → NonEmpty AttrPath → μ ()
 nixProfileInstall config_dir profile attr_paths = do
---  msg "installing" ([fmtT|%t→%t|] (toT config_dir) (toT profile)) attr_paths
-  msg "installing" (config_dir, profile) attr_paths
+  msg "installing" (config_dir, profile) (NonEmpty.sort attr_paths)
   let targets = mkTargets config_dir attr_paths
   nixDo 𝕹 $ [ "profile", "install", "--profile", toText profile ] ⊕
              (toList targets)
@@ -480,7 +518,7 @@ checkPackages ∷ ∀ ε α μ .
                 (MonadIO μ, MonadLog (Log MockIOClass) μ,
                  AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
                  AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
-                 Printable ε, MonadError ε μ) ⇒
+                 AsTextualParseError ε, Printable ε, MonadError ε μ) ⇒
                 (ConfigDir → ProfileDir → NonEmpty AttrPath → μ ())
               → (ConfigDir → ProfileDir → NonEmpty AttrPath → μ α)
               → RemoteState → [ConfigName] → Packages → μ Word8
@@ -509,7 +547,7 @@ collectPackages ∷ ∀ ε ψ μ .
                   (MonadIO μ, Traversable ψ, MonadLog (Log MockIOClass) μ,
                    AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
                    AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
-                   Printable ε, MonadError ε μ) ⇒
+                   AsTextualParseError ε, Printable ε, MonadError ε μ) ⇒
                   RemoteState → ψ ConfigName → Packages
                 → μ (ψ (ConfigDir, ProfileDir, NonEmpty AttrPath))
 
@@ -518,7 +556,7 @@ collectPackages r cs pkgs =
     config_dir     ← configDirFromAbs c
     target_profile ← nixProfileAbsDir (toText $ unConfigName c)
 
-    flkPkgs ∷ FlakePkgs ← flakeShow' r config_dir
+    flkPkgs ∷ FlakePkgs ← flakeShowNM r config_dir
 
     pkgs' ∷ NonEmpty Pkg ← case pkgs of
               SomePackages ps → return ps
@@ -548,7 +586,7 @@ installFromOneConfig ∷
 
 installFromOneConfig config_dir target_profile attr_paths = do
   profile_manifest ← noMock $
-    readManifestDir Informational target_profile ≫ either throwUserError return
+    readManifestDir Notice target_profile ≫ either throwUserError return
 
   -- pre-remove anything found in the manifest; we're replacing/updating,
   -- rather than adding
@@ -564,6 +602,9 @@ installFromOneConfig config_dir target_profile attr_paths = do
 
   -- nix profile install adds a new package without removing the older one
 
+  debug' $ [fmt|manifest: %T|] profile_manifest
+  info' $ [fmt|manifest paths: %L|] (attrPaths profile_manifest)
+  info' $ [fmt|attr_paths: %L|] (toList attr_paths)
   let removals = intersect (attrPaths profile_manifest) (toList attr_paths)
   nixProfileRemove target_profile removals
   nixProfileInstall config_dir target_profile attr_paths
@@ -577,14 +618,14 @@ installFromOneConfig config_dir target_profile attr_paths = do
 {-| List all the packages from a given flake -}
 mainListPkgs ∷ (MonadIO μ, MonadReader δ μ, HasDoMock δ,
                 AsAesonError ε, AsProcExitError ε, AsCreateProcError ε,
-                AsFPathError ε, AsIOError ε, Printable ε,
+                AsFPathError ε, AsIOError ε, AsTextualParseError ε, Printable ε,
                 MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
                RemoteState → Configs → μ Word8
 mainListPkgs r AllConfigs = allConfigNames ≫ mainListPkgs r ∘ SomeConfigs
 mainListPkgs r (SomeConfigs []) = mainListPkgs r (SomeConfigs [configDefault])
 mainListPkgs r (SomeConfigs cs) = do
   config_dirs ∷ [ConfigDir] ← mapM configDirFromAbs cs
-  xs ∷ [(𝕋,𝕋,𝕋,𝕋)] ← sortOn (view _1) ⊳ ю ⊳ (namePkgVers ⊳⊳ (flakeShow r ⮞ config_dirs))
+  xs ∷ [(𝕋,𝕋,𝕋,𝕋,𝕋)] ← sortOn (view _1) ⊳ ю ⊳ (namePkgVers ⊳⊳ (flakeShowNM r ⮞ config_dirs))
 -- add config name/dir here
 
   let xs' = tupleToList ⊳ xs

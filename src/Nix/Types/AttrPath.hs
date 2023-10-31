@@ -24,6 +24,7 @@ import Data.List.NonEmpty qualified as NonEmpty
 
 import Control.Monad.Fail ( fail )
 import Data.List          ( reverse )
+import Data.Ord           ( Ord(compare), comparing )
 import GHC.Exts           ( fromString )
 
 -- data-textual ------------------------
@@ -68,6 +69,9 @@ pkg = lens _pkg (\ ap p → ap { _pkg = p })
 
 instance Printable AttrPath where
   print (AttrPath ps p) = P.text $ intercalate "." (ps ⊕ [unPkg p])
+
+instance Ord AttrPath where
+  compare = comparing toText
 
 instance TextualPlus AttrPath where
   textual' =

@@ -8,6 +8,7 @@ module Nix.Types
   , ConfigName(ConfigName, unConfigName)
   , Hash(unHash)
   , Pkg(Pkg, unPkg)
+  , Priority(Priority, unPriority)
   , ProfileDir(ProfileDir, unProfileDir)
   , RemoteState(..)
   , ToBriefText(toT)
@@ -25,7 +26,7 @@ import Prelude ( error )
 
 -- aeson -------------------------------
 
-import Data.Aeson ( FromJSONKey )
+import Data.Aeson ( FromJSON, FromJSONKey )
 
 -- base --------------------------------
 
@@ -33,6 +34,7 @@ import Data.Char ( isAlpha, isAlphaNum )
 import Data.List ( intercalate )
 import Data.Ord  ( Ord(compare) )
 import GHC.Exts  ( IsString(fromString) )
+import Text.Read ( read )
 
 -- deepseq -----------------------------
 
@@ -59,6 +61,10 @@ import Text.Parser.Combinators ( choice, optional, try )
 -- safe --------------------------------
 
 import Safe ( lastMay )
+
+-- text --------------------------------
+
+import Data.Text ( pack )
 
 -- text-printer ------------------------
 
@@ -136,6 +142,30 @@ newtype Hash = Hash { unHash :: 𝕋 }
 newtype Pkg = Pkg { unPkg :: 𝕋 }
   deriving newtype (Eq, FromJSONKey, IsString, NFData, Ord, Printable, Show)
 
+instance TextualPlus Pkg where
+  textual' =
+    let alpha_under_score      ∷ CharParsing η ⇒ η ℂ
+        alpha_under_score      = satisfy (\ c → isAlpha c ∨ c ≡ '_')
+        non_hyphen             ∷ CharParsing η ⇒ η ℂ
+        non_hyphen             = satisfy (\ c → isAlphaNum c ∨ c ∈ "_.")
+        simple_identifier      ∷ CharParsing η ⇒ η 𝕊
+        simple_identifier      = (:) ⊳ alpha_under_score ⊵ many non_hyphen
+    in  (Pkg ∘ pack) ⊳ intercalate "-" ⊳ ((:) ⊳ simple_identifier
+                                       ⊵ many(try $char '-' ⋫simple_identifier))
+
+
+------------------------------------------------------------
+
+{-| a nix profile manifest priority -}
+newtype Priority = Priority { unPriority :: ℕ }
+  deriving newtype (Eq, FromJSON, NFData, Ord, Show)
+
+instance Printable Priority where
+  print (Priority n) = P.text $ [fmt|%d|] n
+
+instance TextualPlus Priority where
+  textual' = Priority ∘ read ⊳ some digit
+
 ------------------------------------------------------------
 
 {-| a nix package version -}
@@ -169,13 +199,14 @@ pkgRE =
     simple_identifier      = (:) ⊳ alpha_under_score ⊵ many non_hyphen
     hyphenated_identifiers ∷ CharParsing η ⇒ η 𝕊
     hyphenated_identifiers =
-      intercalate "-" ⊳ ((:) ⊳ simple_identifier ⊵many(try $ char '-' ⋫simple_identifier))
+      intercalate "-" ⊳ ((:) ⊳ simple_identifier
+                             ⊵ many (try $ char '-' ⋫ simple_identifier))
     numeric_identifier     ∷ CharParsing η ⇒ η 𝕊
     numeric_identifier     =
       (:) ⊳ digit ⊵ many (satisfy (\ c → isAlphaNum c ∨ c ∈ "-_."))
     fromStr p v = (fromString p, fromString ⊳ v)
   in
-    (fromStr ⊳ hyphenated_identifiers ⊵ optional(char '-' ⋫ numeric_identifier))
+    (fromStr ⊳ hyphenated_identifiers ⊵ optional (char '-' ⋫ numeric_identifier))
 
 ----------------------------------------
 
