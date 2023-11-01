@@ -107,7 +107,8 @@ import Control.Monad.Reader ( MonadReader, runReaderT )
 
 -- parsers -----------------------------
 
-import Text.Parser.Char ( char )
+import Text.Parser.Char        ( char )
+import Text.Parser.Combinators ( optional )
 
 -- text --------------------------------
 
@@ -170,7 +171,8 @@ instance FromJSON FlakePkg where
     withObject "FlakePkg" $
     \ v → do
           name ← v .: "name"
-          (p,vers) ← parseT pkgRE "FlakePkg" (unpack name)
+          (p,vers) ← parseT ((,) ⊳ textual' ⊵ optional (char '-' ⋫ textual'))
+                            "(Pkg,𝕄 Ver)" (unpack name)
           FlakePkg ⊳ v .:? "description" ⊵ return p ⊵ return vers ⊵ v .: "type"
                    -- when reading the flake show output, priority is always 𝕹
                    -- as we read this from flake.priorities

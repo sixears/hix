@@ -173,6 +173,10 @@ instance TextualPlus Priority where
 newtype Ver = Ver { unVer :: 𝕋 }
   deriving newtype (Eq, IsString, Printable, Show)
 
+instance TextualPlus Ver where
+  textual' = let alNumHypUnderDot = satisfy (\c → isAlphaNum c ∨ c ∈ "-_.")
+             in  fromString ⊳ ((:) ⊳ digit ⊵ many alNumHypUnderDot)
+
 ------------------------------------------------------------
 
 {-| a nix package version -}
@@ -190,13 +194,7 @@ instance Printable (ConfigDir,ProfileDir) where
 ------------------------------------------------------------
 
 pkgRE ∷ (CharParsing η, MonadFail η) ⇒ η (Pkg, 𝕄 Ver)
-pkgRE =
-  let
-    numeric_identifier     ∷ CharParsing η ⇒ η 𝕊
-    numeric_identifier     =
-      (:) ⊳ digit ⊵ many (satisfy (\ c → isAlphaNum c ∨ c ∈ "-_."))
-  in
-    ((,) ⊳ textual' ⊵ optional (char '-' ⋫ (fromString ⊳ numeric_identifier)))
+pkgRE = ((,) ⊳ textual' ⊵ optional (char '-' ⋫ textual'))
 
 ----------------------------------------
 
