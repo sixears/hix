@@ -39,11 +39,9 @@ import Data.Aeson.Error ( AsAesonError, throwAsAesonError )
 
 -- base --------------------------------
 
-import Control.Monad      ( foldM )
 import Control.Monad.Fail ( MonadFail(fail) )
 import Data.Function      ( flip )
 import Data.Maybe         ( catMaybes, fromMaybe )
-import Data.Monoid        ( Monoid )
 import Data.Tuple         ( uncurry )
 import GHC.Generics       ( Generic )
 
@@ -51,24 +49,18 @@ import GHC.Generics       ( Generic )
 
 import Data.Map.Strict qualified as Map
 
--- data-textual ------------------------
-
-import Data.Textual ( Parsed(Parsed) )
-
 -- fpath -------------------------------
 
 import FPath.AbsFile          ( AbsFile )
 import FPath.AppendableFPath  ( (⫻) )
 import FPath.AsFilePath       ( filepath )
 import FPath.Error.FPathError ( AsFPathError )
-import FPath.File             ( File, FileAs(_File_) )
+import FPath.File             ( File, FileAs )
 import FPath.RelFile          ( relfile )
 
 -- lens --------------------------------
 
-import Control.Lens.At     ( at )
-import Control.Lens.Getter ( view )
-import Control.Lens.Tuple  ( _2 )
+import Control.Lens.At ( at )
 
 -- log-plus ----------------------------
 
@@ -84,7 +76,7 @@ import MockIO.DoMock ( DoMock(NoMock) )
 
 -- mockio-log --------------------------
 
-import MockIO.IOClass ( HasIOClass, IOClass(IORead, IOWrite) )
+import MockIO.IOClass ( HasIOClass )
 import MockIO.Log     ( HasDoMock, MockIOClass )
 
 -- mockio-plus -------------------------
@@ -96,9 +88,6 @@ import MockIO.Process.MLCmdSpec ( MLCmdSpec, mock_value )
 
 import MonadIO.Error.CreateProcError ( AsCreateProcError )
 import MonadIO.Error.ProcExitError   ( AsProcExitError )
-import MonadIO.NamedHandle           ( HGetContents(hGetContents),
-                                       HWriteContents(hWriteContents), ℍ,
-                                       impliedEncoding, impliedEncodingM )
 import MonadIO.Process.ExitStatus    ( ExitStatus, evOK )
 
 -- more-unicode ------------------------
@@ -111,12 +100,11 @@ import Control.Monad.Reader ( MonadReader, runReaderT )
 
 -- parsers -----------------------------
 
-import Text.Parser.Char        ( char )
-import Text.Parser.Combinators ( optional )
+import Text.Parser.Char ( char )
 
 -- text --------------------------------
 
-import Data.Text          ( concat, intercalate, pack, unpack )
+import Data.Text          ( concat, intercalate, pack )
 import Data.Text.Encoding ( encodeUtf8 )
 
 -- text-printer ------------------------
@@ -125,9 +113,8 @@ import Text.Printer qualified as P
 
 -- textual-plus ------------------------
 
-import TextualPlus                         ( PrintOut, TextualPlus(textual'),
-                                             parseT, parseText, parseTextM,
-                                             parseTextual, tparse )
+import TextualPlus                         ( TextualPlus(textual'), parseTextM,
+                                             tparse )
 import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 
 ------------------------------------------------------------
@@ -491,8 +478,10 @@ pkgPrioritiesFromList ∷ MonadFail η ⇒ [PkgPriority] → η PkgPriorities
 pkgPrioritiesFromList pkps =
   let go ∷ MonadFail η ⇒
            Map.Map Pkg Priority → PkgPriority → η (Map.Map Pkg Priority)
-      go pps (PkgPriority (p,y)) = case p `Map.lookup` pps of
-                                     𝕹 → return $ Map.insert p y pps
+      go pps (PkgPriority (p,y)) =
+        case p `Map.lookup` pps of
+          𝕹 → return $ Map.insert p y pps
+          𝕵 y' → fail $ [fmt|duplicate priorities found for %T: (%T,%T)|] p y y'
   in  PkgPriorities ⊳ foldM go Map.empty pkps
 {-
   let xx ∷ PkgPriority → (Pkg,[Priority])

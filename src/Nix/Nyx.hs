@@ -156,8 +156,8 @@ import Nix.Types.AttrPath qualified as AttrPath
 
 import Nix.Error            ( AsNixError, NixProgramError )
 import Nix.Flake            ( FlakePkg, FlakePkgs, archMap, flakeShow,
-                              flakeShowNM, location, pkg, pkgFindNames', ver,
-                              x86_64_, x86_64_pkgs )
+                              flakeShowNM, location, pkg, pkgFindNames',
+                              priority, ver, x86_64_, x86_64_pkgs )
 import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
 import Nix.Types            ( Arch, ConfigDir(ConfigDir, unConfigDir),
@@ -188,6 +188,10 @@ instance HomogenousTuple (α,α,α,α) where
 instance HomogenousTuple (α,α,α,α,α) where
   type instance TupleItem (α,α,α,α,α) = α
   tupleToList (a0,a1,a2,a3,a4) = [a0,a1,a2,a3,a4]
+
+instance HomogenousTuple (α,α,α,α,α,α) where
+  type instance TupleItem (α,α,α,α,α,α) = α
+  tupleToList (a0,a1,a2,a3,a4,a5) = [a0,a1,a2,a3,a4,a5]
 
 ------------------------------------------------------------
 
@@ -362,6 +366,10 @@ instance ∀ α β γ . TuplePrepend α (β,γ) (α,β,γ) where
   type instance TuplePrepended α (β,γ) = (α,β,γ)
   tuplePrepend α (β,γ) = (α,β,γ)
 
+instance ∀ α β γ δ . TuplePrepend α (β,γ,δ) (α,β,γ,δ) where
+  type instance TuplePrepended α (β,γ,δ) = (α,β,γ,δ)
+  tuplePrepend α (β,γ,δ) = (α,β,γ,δ)
+
 class TupleAppend α β γ where
   type family TupleAppended α β
   tupleAppend ∷ α → β → γ
@@ -380,15 +388,20 @@ instance ∀ α β γ δ κ . TupleAppend (α,β,γ,δ) κ (α,β,γ,δ,κ) wher
   type instance TupleAppended (α,β,γ,δ) κ = (α,β,γ,δ,κ)
   tupleAppend (α,β,γ,δ) κ = (α,β,γ,δ,κ)
 
-namePkgVers ∷ FlakePkgs → [(𝕋,𝕋,𝕋,𝕋,𝕋)]
-namePkgVers pkgs =
-  let
-    pkgVer ∷ FlakePkg → (𝕋,𝕋)
-    pkgVer fp = (toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver)
+instance ∀ α β γ δ κ ι . TupleAppend (α,β,γ,δ,κ) ι (α,β,γ,δ,κ,ι) where
+  type instance TupleAppended (α,β,γ,δ,κ) ι = (α,β,γ,δ,κ,ι)
+  tupleAppend (α,β,γ,δ,κ) ι = (α,β,γ,δ,κ,ι)
 
-    go ∷ Pkg → FlakePkg → [(𝕋,𝕋,𝕋,𝕋)]
-    go p fp = [(toText p ⨤ (pkgVer fp) ∷ (𝕋,𝕋,𝕋)) ⨦ toText (pkgs ⊣ location)]
-    go' ∷ Arch → Map.Map Pkg FlakePkg → [(𝕋,𝕋,𝕋,𝕋,𝕋)]
+namePkgVersPrioSrcArch ∷ FlakePkgs → [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)]
+namePkgVersPrioSrcArch pkgs =
+  let
+    pkgVer ∷ FlakePkg → (𝕋,𝕋,𝕋)
+    pkgVer fp = (toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver,
+                 maybe "" toText $ fp ⊣ priority)
+
+    go ∷ Pkg → FlakePkg → [(𝕋,𝕋,𝕋,𝕋,𝕋)]
+    go p fp = [(toText p ⨤ (pkgVer fp) ∷ (𝕋,𝕋,𝕋,𝕋)) ⨦ toText (pkgs ⊣ location)]
+    go' ∷ Arch → Map.Map Pkg FlakePkg → [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)]
     go' arch fpmap = (⨦ (toText arch)) ⊳ Map.foldMapWithKey go fpmap
   in
     Map.foldMapWithKey go' (pkgs ⊣ archMap)
@@ -625,11 +638,10 @@ mainListPkgs r AllConfigs = allConfigNames ≫ mainListPkgs r ∘ SomeConfigs
 mainListPkgs r (SomeConfigs []) = mainListPkgs r (SomeConfigs [configDefault])
 mainListPkgs r (SomeConfigs cs) = do
   config_dirs ∷ [ConfigDir] ← mapM configDirFromAbs cs
-  xs ∷ [(𝕋,𝕋,𝕋,𝕋,𝕋)] ← sortOn (view _1) ⊳ ю ⊳ (namePkgVers ⊳⊳ (flakeShowNM r ⮞ config_dirs))
--- add config name/dir here
+  xs ∷ [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)] ← sortOn (view _1) ⊳ ю ⊳ (namePkgVersPrioSrcArch ⊳⊳ (flakeShowNM r ⮞ config_dirs))
 
   let xs' = tupleToList ⊳ xs
-  forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight, JustifyLeft] xs')
+  forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight, JustifyLeft, JustifyLeft, JustifyLeft] xs')
                 (say ∘ intercalate "\t")
   return 0
 

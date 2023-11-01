@@ -16,7 +16,6 @@ import Base1T
 -- base --------------------------------
 
 import Control.Monad.Fail ( MonadFail )
-import Data.Char          ( isAlpha, isAlphaNum )
 import GHC.Exts           ( fromString )
 
 -- fpath -------------------------------
@@ -29,9 +28,8 @@ import FPath.RelDir           ( reldir )
 
 -- parsers -----------------------------
 
-import Text.Parser.Char        ( CharParsing, alphaNum, char, digit, satisfy,
-                                 string )
-import Text.Parser.Combinators ( count, optional, try, unexpected )
+import Text.Parser.Char        ( CharParsing, alphaNum, char, string )
+import Text.Parser.Combinators ( count, unexpected )
 
 -- text --------------------------------
 
@@ -49,7 +47,7 @@ import TextualPlus ( TextualPlus(textual'), checkT )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Types ( Hash(unHash), Pkg(unPkg), Ver(unVer), pkgRE )
+import Nix.Types ( Hash(unHash), Pkg(unPkg), Ver(unVer), unPkgMVer )
 
 --------------------------------------------------------------------------------
 
@@ -73,8 +71,8 @@ data StorePath = StorePath { _path' :: AbsDir
    return hash, pkg, (maybe) ver
 -}
 storePathRE ∷ (CharParsing η, MonadFail η) ⇒ η (Hash, Pkg, 𝕄 Ver)
-storePathRE = (\ h (p,v) → (fromString h, p, v)) ⊳
-              (string "/nix/store/" ⋫ count 32 alphaNum) ⊵ (char '-' ⋫ pkgRE)
+storePathRE = (\ h (unPkgMVer → (p,v)) → (fromString h, p, v)) ⊳
+              (string "/nix/store/" ⋫ count 32 alphaNum) ⊵ (char '-' ⋫ textual')
 
 instance Printable StorePath where
   print (StorePath _ h p v) =

@@ -16,7 +16,6 @@ module Nix.Types
   , Ver(unVer)
   , configDirName
   , configNameFromDir
-  , pkgRE
   , remoteArgs
   , x86_64Linux
   ) where
@@ -31,12 +30,11 @@ import Data.Aeson ( FromJSON, FromJSONKey )
 
 -- base --------------------------------
 
-import Control.Monad.Fail ( MonadFail )
-import Data.Char          ( isAlpha, isAlphaNum )
-import Data.List          ( intercalate )
-import Data.Ord           ( Ord(compare) )
-import GHC.Exts           ( IsString(fromString) )
-import Text.Read          ( read )
+import Data.Char ( isAlpha, isAlphaNum )
+import Data.List ( intercalate )
+import Data.Ord  ( Ord(compare) )
+import GHC.Exts  ( IsString(fromString) )
+import Text.Read ( read )
 
 -- deepseq -----------------------------
 
@@ -193,9 +191,6 @@ instance Printable (ConfigDir,ProfileDir) where
   print (c,p) = P.text $ [fmt|%T→%T|] c p
 
 ------------------------------------------------------------
-
-pkgRE ∷ (CharParsing η, MonadFail η) ⇒ η (Pkg, 𝕄 Ver)
-pkgRE = ((,) ⊳ textual' ⊵ optional (char '-' ⋫ textual'))
 
 newtype PkgMVer = PkgMVer { unPkgMVer :: (Pkg, 𝕄 Ver) }
 
