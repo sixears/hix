@@ -73,28 +73,8 @@ data StorePath = StorePath { _path' :: AbsDir
    return hash, pkg, (maybe) ver
 -}
 storePathRE ∷ (CharParsing η, MonadFail η) ⇒ η (Hash, Pkg, 𝕄 Ver)
-storePathRE =
-  let
-    _pkgRE ∷ CharParsing η ⇒ η (𝕊, 𝕄 𝕊)
-    _pkgRE =
-      let
-        alpha_under_score      ∷ CharParsing η ⇒ η ℂ
-        alpha_under_score      = satisfy (\ c → isAlpha c ∨ c ≡ '_')
-        non_hyphen             ∷ CharParsing η ⇒ η ℂ
-        non_hyphen             = satisfy (\ c → isAlphaNum c ∨ c ∈ "_.")
-        simple_identifier      ∷ CharParsing η ⇒ η 𝕊
-        simple_identifier      = (:) ⊳ alpha_under_score ⊵ many non_hyphen
-        hyphenated_identifiers ∷ CharParsing η ⇒ η 𝕊
-        hyphenated_identifiers =
-          ю ⊳ ((:) ⊳ simple_identifier ⊵many(try $ char '-' ⋫simple_identifier))
-        numeric_identifier     ∷ CharParsing η ⇒ η 𝕊
-        numeric_identifier     =
-          (:) ⊳ digit ⊵ many (satisfy (\ c → isAlphaNum c ∨ c ∈ "-_."))
-      in
-        ((,) ⊳ hyphenated_identifiers ⊵ optional(char '-' ⋫ numeric_identifier))
-  in
-    (\ h (p,v) → (fromString h, p, v)) ⊳
-      (string "/nix/store/" ⋫ count 32 alphaNum) ⊵ (char '-' ⋫ pkgRE)
+storePathRE = (\ h (p,v) → (fromString h, p, v)) ⊳
+              (string "/nix/store/" ⋫ count 32 alphaNum) ⊵ (char '-' ⋫ pkgRE)
 
 instance Printable StorePath where
   print (StorePath _ h p v) =

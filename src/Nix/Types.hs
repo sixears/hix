@@ -8,6 +8,7 @@ module Nix.Types
   , ConfigName(ConfigName, unConfigName)
   , Hash(unHash)
   , Pkg(Pkg, unPkg)
+  , PkgMVer(unPkgMVer)
   , Priority(Priority, unPriority)
   , ProfileDir(ProfileDir, unProfileDir)
   , RemoteState(..)
@@ -195,6 +196,11 @@ instance Printable (ConfigDir,ProfileDir) where
 
 pkgRE ∷ (CharParsing η, MonadFail η) ⇒ η (Pkg, 𝕄 Ver)
 pkgRE = ((,) ⊳ textual' ⊵ optional (char '-' ⋫ textual'))
+
+newtype PkgMVer = PkgMVer { unPkgMVer :: (Pkg, 𝕄 Ver) }
+
+instance TextualPlus PkgMVer where
+  textual' = PkgMVer ⊳ ((,) ⊳ textual' ⊵ optional (char '-' ⋫ textual'))
 
 ----------------------------------------
 

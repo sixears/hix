@@ -51,6 +51,10 @@ import GHC.Generics       ( Generic )
 
 import Data.Map.Strict qualified as Map
 
+-- data-textual ------------------------
+
+import Data.Textual ( Parsed(Parsed) )
+
 -- fpath -------------------------------
 
 import FPath.AbsFile          ( AbsFile )
@@ -122,7 +126,8 @@ import Text.Printer qualified as P
 -- textual-plus ------------------------
 
 import TextualPlus                         ( PrintOut, TextualPlus(textual'),
-                                             parseT, parseTextual, tparse )
+                                             parseT, parseText, parseTextM,
+                                             parseTextual, tparse )
 import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 
 ------------------------------------------------------------
@@ -134,7 +139,7 @@ import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
                             throwAsNixDuplicatePkgError,
                             throwAsNixErrorDuplicatePkg )
 import Nix.Types          ( Arch, ConfigDir(unConfigDir), Pkg, Priority,
-                            RemoteState, Ver, pkgRE, remoteArgs, unPriority,
+                            RemoteState, Ver, remoteArgs, unPkgMVer, unPriority,
                             x86_64Linux )
 import Nix.Types.AttrPath ( AttrPath, mkAttrPath )
 
@@ -171,8 +176,12 @@ instance FromJSON FlakePkg where
     withObject "FlakePkg" $
     \ v → do
           name ← v .: "name"
+{-
           (p,vers) ← parseT ((,) ⊳ textual' ⊵ optional (char '-' ⋫ textual'))
                             "(Pkg,𝕄 Ver)" (unpack name)
+-}
+          (p,vers) ← unPkgMVer ⊳ parseTextM "PkgMVer" name
+--            Parsed _ → _
           FlakePkg ⊳ v .:? "description" ⊵ return p ⊵ return vers ⊵ v .: "type"
                    -- when reading the flake show output, priority is always 𝕹
                    -- as we read this from flake.priorities
