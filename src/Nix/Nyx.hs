@@ -16,7 +16,7 @@ module Nix.Nyx
 
 import Base1T
 
-import Prelude ( Monoid, error, (*) )
+import Prelude ( Monoid, error, undefined, (*) )
 
 -- aeson-plus --------------------------
 
@@ -26,12 +26,13 @@ import Data.Aeson.Error ( AsAesonError )
 
 import Data.List.NonEmpty qualified as NonEmpty
 
-import Data.Foldable      ( Foldable )
+import Data.Foldable      ( Foldable, concat )
 import Data.Function      ( flip )
 import Data.Functor       ( Functor )
 import Data.List          ( any, intersect, repeat, sort, sortOn, transpose,
                             zip, zipWith )
-import Data.List.NonEmpty ( nonEmpty )
+import Data.List.NonEmpty ( groupWith1, nonEmpty, sortWith )
+import Data.Tuple         ( swap, uncurry )
 
 -- containers --------------------------
 
@@ -109,8 +110,9 @@ import Natural ( length, replicate )
 -- optparse-applicative ----------------
 
 import Options.Applicative.Builder     ( command, eitherReader, flag, flag',
-                                         help, info, long, option, progDesc,
-                                         short, strArgument, subparser )
+                                         help, long, option, progDesc, short,
+                                         strArgument, subparser )
+import Options.Applicative.Builder     qualified as Builder
 import Options.Applicative.Help.Pretty ( empty, vcat )
 import Options.Applicative.Types       ( Parser )
 
@@ -162,7 +164,7 @@ import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
 import Nix.Types            ( Arch, ConfigDir(ConfigDir, unConfigDir),
                               ConfigName(ConfigName, unConfigName), Pkg(Pkg),
-                              ProfileDir,
+                              Priority(unPriority), ProfileDir,
                               RemoteState(FullyConnected, Isolated, Remote),
                               ToBriefText(toT) )
 import Nix.Types.AttrPath   ( AttrPath )
@@ -279,16 +281,16 @@ parseOptions =
               ∤ flag' Isolated (ю [ short 'R', long "isolated"
                                   , help "disconnected from all networks" ]))
             ⊵ subparser (ю [ command "list-config-dirs"
-                                     (info (pure ModeListConfigs)
+                                     (Builder.info (pure ModeListConfigs)
                                       (progDesc "list config directories"))
                            , command "list-config-names"
-                                     (info (pure ModeListConfigNames)
+                                     (Builder.info (pure ModeListConfigNames)
                                       (progDesc "list config names"))
                            , command "list-packages"
-                                     (info (ModeListPkgs ⊳ configs_option')
+                                     (Builder.info(ModeListPkgs⊳configs_option')
                                       (progDesc "list packages"))
                            , command "install"
-                                     (info install_parser
+                                     (Builder.info install_parser
                                       (progDesc "install one or more packages"))
                            ])
 
@@ -449,29 +451,32 @@ mkTargets config_dir attr_paths =
 
 ----------------------------------------
 
-debug' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
-debug' t = asks (view doMock) ≫ \ mock → debugIO mock t
+debug ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+debug t = asks (view doMock) ≫ \ mock → debugIO mock t
 
-info' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
-info' t = asks (view doMock) ≫ \ mock → infoIO mock t
+info ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+info t = asks (view doMock) ≫ \ mock → infoIO mock t
 
-notice' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
-notice' t = asks (view doMock) ≫ \ mock → noticeIO mock t
+notice ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+notice t = asks (view doMock) ≫ \ mock → noticeIO mock t
 
-warn' ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η()
-warn' t = asks (view doMock) ≫ \ mock → warnIO mock t
+warn ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+warn t = asks (view doMock) ≫ \ mock → warnIO mock t
+
+warn' ∷ (MonadIO η, MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+warn' = flip runReaderT NoMock ∘ warn
 
 msg ∷ ∀ τ δ φ η . (MonadIO η, Foldable φ, Printable τ, ToBriefText τ,
                    HasDoMock δ, MonadReader δ η, MonadLog (Log MockIOClass) η) ⇒
       𝕋 → τ → φ AttrPath → η ()
 msg verb object attr_paths = do
   let names = sort $ toText ∘ view AttrPath.pkg ⊳ toList attr_paths
-  warn' $ [fmt|%t (%t): %L|] verb (toT object) names
-  notice' $ [fmt|%t: (%T) %L|] verb object attr_paths
+  warn $ [fmt|%t (%t): %L|] verb (toT object) names
+  notice $ [fmt|%t: (%T) %L|] verb object attr_paths
 
 ----------------------------------------
 
@@ -501,16 +506,20 @@ nixProfileRemove profile attr_paths = do
 
 ----------------------------------------
 
-nixProfileInstall ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
-                              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                              AsProcExitError ε, Printable ε, MonadError ε μ,
-                              MonadLog (Log MockIOClass) μ) ⇒
-                   ConfigDir → ProfileDir → NonEmpty AttrPath → μ ()
-nixProfileInstall config_dir profile attr_paths = do
-  msg "installing" (config_dir, profile) (NonEmpty.sort attr_paths)
+nixProfileInstall ∷ ∀ ε δ μ .
+                    (MonadIO μ, MonadReader δ μ, HasDoMock δ,
+                     AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                     AsProcExitError ε, Printable ε, MonadError ε μ,
+                     MonadLog (Log MockIOClass) μ) ⇒
+                    ConfigDir → ProfileDir → 𝕄 Priority→NonEmpty AttrPath→μ ()
+nixProfileInstall config_dir profile prio_m attr_paths = do
+  let verb = maybe "" [fmt| «prio %T»|] prio_m
+  msg ("installing" ◇ verb) (config_dir, profile) (NonEmpty.sort attr_paths)
   let targets = mkTargets config_dir attr_paths
-  nixDo 𝕹 $ [ "profile", "install", "--profile", toText profile ] ⊕
-             (toList targets)
+  let extra_args = maybe [] (\ p → ["--priority", [fmt|%d|] (unPriority p)])
+                         prio_m
+  nixDo 𝕹 $ ю [ [ "profile", "install", "--profile", toText profile ]
+              , extra_args, toList targets ]
 
 ----------------------------------------
 
@@ -532,37 +541,47 @@ checkPackages ∷ ∀ ε α μ .
                  AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
                  AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
                  AsTextualParseError ε, Printable ε, MonadError ε μ) ⇒
-                (ConfigDir → ProfileDir → NonEmpty AttrPath → μ ())
-              → (ConfigDir → ProfileDir → NonEmpty AttrPath → μ α)
+                (ConfigDir → ProfileDir
+                           → Map.Map (𝕄 Priority) (NonEmpty AttrPath) → μ ())
+              → (ConfigDir → ProfileDir
+                           → Map.Map (𝕄 Priority) (NonEmpty AttrPath) → μ α)
               → RemoteState → [ConfigName] → Packages → μ Word8
 checkPackages check go r [] pkgs = checkPackages check go r [configDefault] pkgs
-
-checkPackages check go r [c] pkgs = do
-  targets ∷ [(ConfigDir,ProfileDir,NonEmpty AttrPath)] ←
-    collectPackages r [c] pkgs
-  -- we split into 'check' and 'go' so that we can do pre-emptively make all the
-  -- necessary checks before making any destructive changes
-  forM_ targets (\ (cd,pd,aps) → check cd pd aps)
-  forM_ targets (\ (cd,pd,aps) → go cd pd aps)
-  return 0
-
 checkPackages check go r cs pkgs = do
-  targets ∷ [(ConfigDir,ProfileDir,NonEmpty AttrPath)] ←
-    collectPackages r cs pkgs
+  -- targets ∷ [(ConfigDir,ProfileDir,NonEmpty AttrPath)]
+  targets ← collectPackages r cs pkgs
   -- we split into 'check' and 'go' so that we can do pre-emptively make all the
   -- necessary checks before making any destructive changes
   forM_ targets (\ (cd,pd,aps) → check cd pd aps)
   forM_ targets (\ (cd,pd,aps) → go cd pd aps)
   return 0
---  error $ [fmt|%L|] cs
 
+----------------------------------------
+
+multiMap ∷ (Foldable ψ, Ord κ) ⇒ ψ (κ,ν) → Map.Map κ (NonEmpty ν)
+multiMap = Map.fromListWith (◇) ∘ fmap (second pure) ∘ toList
+
+----------------------------------------
+
+{-| Find what packages to install.
+
+    Given some config names (desktop, haskell, scripts, etc.) and some package
+    names (emacs, audacious, etc.); return a load of tuples of `ConfigDir`
+    (source to build from), `ProfileDir` (profile to install to) and `AttrPath`s
+    (things to install).
+
+    If a number of packages are requested, they must exist in each specified
+    `ConfigDir`.  The use of multiple configs probably makes sense only with
+    `AllPackages`.
+-}
 collectPackages ∷ ∀ ε ψ μ .
                   (MonadIO μ, Traversable ψ, MonadLog (Log MockIOClass) μ,
                    AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
                    AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
                    AsTextualParseError ε, Printable ε, MonadError ε μ) ⇒
                   RemoteState → ψ ConfigName → Packages
-                → μ (ψ (ConfigDir, ProfileDir, NonEmpty AttrPath))
+                → μ (ψ (ConfigDir, ProfileDir,
+                        Map.Map (𝕄 Priority) (NonEmpty AttrPath)))
 
 collectPackages r cs pkgs =
   forM cs (\ c → do
@@ -571,23 +590,32 @@ collectPackages r cs pkgs =
 
     flkPkgs ∷ FlakePkgs ← flakeShowNM r config_dir
 
-    pkgs' ∷ NonEmpty Pkg ← case pkgs of
-              SomePackages ps → return ps
-              AllPackages →
-                case nonEmpty $ x86_64_pkgs flkPkgs of
-                  𝕹    → throwUsage' $ [fmt|no packages found: %T|] config_dir
-                  𝕵 ps → return ps
+    pkgs' ∷ NonEmpty Pkg ←
+      case pkgs of
+        SomePackages ps → return ps
+        AllPackages →
+          case nonEmpty $ x86_64_pkgs flkPkgs of
+            𝕹    → throwUsage' $ [fmt|no packages found: %T|] config_dir
+            𝕵 ps → return ps
     partitionMaybes ∘ toList ⊳ pkgFindNames' flkPkgs pkgs' ≫ \ case
       (missing:[],_) →
-        throwUsage $ [fmtT|package not found: %T|] missing
+        throwUsage $ [fmtT|package not found in %T: %T|] c missing
       (missing@(_:_:_),_) →
-        throwUsage $ [fmtT|packages not found: %L|] missing
-      ([],pkgs'') →
+        throwUsage $ [fmtT|packages not found in %T: %L|] c missing
+      ([],pkgs'' ∷ [(Pkg,(AttrPath, (𝕄 Priority)))]) →
         case nonEmpty (snd ⊳ pkgs'') of
-          𝕵 attr_paths → return (config_dir, target_profile, attr_paths)
+          𝕵 attr_path_prios → do
+            forM (attr_path_prios)
+                 (\ (ap,p) → case p of
+                     𝕹    → warn' $ [fmt|%T|] ap
+                     𝕵 p' → warn' $ [fmt|%T (%T)|] ap p'
+                 )
+            return (config_dir, target_profile,
+                    multiMap $ swap ⊳ attr_path_prios)
           𝕹 →
             throwUsage' $ intercalate " " [ "internal error: nonEmpty pkgs'"
-                                          , "means this should never happen" ])
+                                          , "means this should never happen"])
+
 
 ----------------------------------------
 
@@ -595,9 +623,9 @@ installFromOneConfig ∷
   ∀ ε δ μ . (MonadIO μ, AsProcExitError ε, AsCreateProcError ε,
              AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
              HasDoMock δ, MonadReader δ μ, MonadLog (Log MockIOClass) μ) ⇒
-            ConfigDir → ProfileDir → NonEmpty AttrPath → μ ()
+            ConfigDir → ProfileDir → 𝕄 Priority → NonEmpty AttrPath → μ ()
 
-installFromOneConfig config_dir target_profile attr_paths = do
+installFromOneConfig config_dir target_profile prio_m attr_paths = do
   profile_manifest ← noMock $
     readManifestDir Notice target_profile ≫ either throwUserError return
 
@@ -615,12 +643,12 @@ installFromOneConfig config_dir target_profile attr_paths = do
 
   -- nix profile install adds a new package without removing the older one
 
-  debug' $ [fmt|manifest: %T|] profile_manifest
-  info' $ [fmt|manifest paths: %L|] (attrPaths profile_manifest)
-  info' $ [fmt|attr_paths: %L|] (toList attr_paths)
+  debug $ [fmt|manifest: %T|] profile_manifest
+  info $ [fmt|manifest paths: %L|] (attrPaths profile_manifest)
+  info $ [fmt|attr_path_prios: %L|] (toList attr_paths)
   let removals = intersect (attrPaths profile_manifest) (toList attr_paths)
   nixProfileRemove target_profile removals
-  nixProfileInstall config_dir target_profile attr_paths
+  nixProfileInstall config_dir target_profile prio_m attr_paths
   return ()
 
 ----------------------------------------
@@ -665,8 +693,12 @@ myMain do_mock opts = flip runReaderT do_mock $
       ModeInstall cs ps   →
         -- test build all the packages before we make any destructive changes to
         -- the profile
-        checkPackages (\ cd _ aps → nixBuild cd aps) installFromOneConfig
-                      r cs ps
+        let installFromOneConfigs cd pd =
+              mapM_ (uncurry $ installFromOneConfig cd pd) ∘ Map.toList
+            concat' ∷ [NonEmpty α] → NonEmpty α
+            concat' xs = fromList $ concat (toList ⊳ xs)
+        in  checkPackages (\ cd _ aps → nixBuild cd (concat' $ Map.elems aps))
+                          installFromOneConfigs r cs ps
 
 {-| program main entry point -}
 main ∷ MonadIO μ ⇒ μ ()

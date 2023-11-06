@@ -24,9 +24,6 @@ module Nix.Flake
 
 import Base1T
 
-
-import Prelude ( undefined )
-
 -- aeson -------------------------------
 
 import Data.Aeson ( eitherDecodeStrict' )
@@ -203,9 +200,11 @@ instance HasArchFlakePkgMap (Map Arch (Map Pkg FlakePkg)) where
 instance HasArchFlakePkgMap FlakePkgs' where
   archMap = lens unFlakePkgs' (\ _ m → FlakePkgs' m)
 
+{-
 updatePriorities' ∷ PkgPriorities → FlakePkgs' → FlakePkgs'
 updatePriorities' pkgprios (FlakePkgs' fps) =
   FlakePkgs' (Map.map (Map.map undefined) fps)
+-}
 
 --------------------
 
@@ -302,14 +301,15 @@ pkgFind fp p =
 
 ----------------------------------------
 
-pkgName ∷ (Arch,FlakePkg) → AttrPath
-pkgName (arch,fp) = mkAttrPath (fp ⊣ pkg) ["packages", (toText arch)]
+pkgName ∷ (Arch,FlakePkg) → (AttrPath, 𝕄 Priority)
+pkgName (arch,fp) = (mkAttrPath (fp ⊣ pkg) ["packages", (toText arch)],
+                     fp⊣priority)
 
 ----------------------------------------
 
-pkgFindName_ ∷ (MonadError ε η) ⇒
-               (Pkg → AbsFile → η (𝕄 AttrPath)) → FlakePkgs → Pkg
-             → η (𝕄 AttrPath)
+pkgFindName_ ∷ ∀ ε η . (MonadError ε η) ⇒
+               (Pkg → AbsFile → η (𝕄 (AttrPath,𝕄 Priority))) → FlakePkgs → Pkg
+             → η (𝕄 (AttrPath, 𝕄 Priority))
 pkgFindName_ t fp p = case pkgFind fp p of
                      []    → return 𝕹
                      [afp] → return $ 𝕵 (pkgName afp)
@@ -318,27 +318,28 @@ pkgFindName_ t fp p = case pkgFind fp p of
 --------------------
 
 pkgFindName ∷ (AsNixDuplicatePkgError ε, MonadError ε η) ⇒
-              FlakePkgs → Pkg → η (𝕄 AttrPath)
+              FlakePkgs → Pkg → η (𝕄 (AttrPath, 𝕄 Priority))
 pkgFindName = pkgFindName_ throwAsNixDuplicatePkgError
 
 --------------------
 
-pkgFindName' ∷ (AsNixError ε, MonadError ε η) ⇒ FlakePkgs → Pkg → η (𝕄 AttrPath)
+pkgFindName' ∷ (AsNixError ε, MonadError ε η) ⇒
+               FlakePkgs → Pkg → η (𝕄 (AttrPath, 𝕄 Priority))
 pkgFindName' = pkgFindName_ throwAsNixErrorDuplicatePkg
 
 ----------------------------------------
 
 pkgFindNames_ ∷ (Traversable ψ, MonadError ε η) ⇒
-                (FlakePkgs → Pkg → η (𝕄 AttrPath)) → FlakePkgs → ψ Pkg
-              → η (ψ (Pkg, 𝕄 AttrPath))
+                (FlakePkgs → Pkg → η (𝕄 (AttrPath, (𝕄 Priority))))
+              → FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 (AttrPath, (𝕄 Priority))))
 pkgFindNames_ f fp = mapM (\ p → (p,) ⊳ f fp p)
 
 pkgFindNames ∷ (Traversable ψ, AsNixDuplicatePkgError ε, MonadError ε η) ⇒
-               FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 AttrPath))
+               FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 (AttrPath, (𝕄 Priority))))
 pkgFindNames = pkgFindNames_ pkgFindName
 
 pkgFindNames' ∷ (Traversable ψ, AsNixError ε, MonadError ε η) ⇒
-                FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 AttrPath))
+                FlakePkgs → ψ Pkg → η (ψ (Pkg, 𝕄 (AttrPath, (𝕄 Priority))))
 pkgFindNames' = pkgFindNames_ pkgFindName'
 
 ----------------------------------------
