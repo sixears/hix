@@ -16,7 +16,7 @@ module Nix.Nyx
 
 import Base1T
 
-import Prelude ( Monoid, error, undefined, (*) )
+import Prelude ( Monoid, error, (*) )
 
 -- aeson-plus --------------------------
 
@@ -31,7 +31,7 @@ import Data.Function      ( flip )
 import Data.Functor       ( Functor )
 import Data.List          ( any, intersect, repeat, sort, sortOn, transpose,
                             zip, zipWith )
-import Data.List.NonEmpty ( groupWith1, nonEmpty, sortWith )
+import Data.List.NonEmpty ( nonEmpty )
 import Data.Tuple         ( swap, uncurry )
 
 -- containers --------------------------
@@ -157,9 +157,9 @@ import Nix ( nixDo )
 import Nix.Types.AttrPath qualified as AttrPath
 
 import Nix.Error            ( AsNixError, NixProgramError )
-import Nix.Flake            ( FlakePkg, FlakePkgs, archMap, flakeShow,
-                              flakeShowNM, location, pkg, pkgFindNames',
-                              priority, ver, x86_64_, x86_64_pkgs )
+import Nix.Flake            ( FlakePkg, FlakePkgs, archMap, flakeShowNM,
+                              location, pkg, pkgFindNames', priority, ver,
+                              x86_64_pkgs )
 import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
 import Nix.Types            ( Arch, ConfigDir(ConfigDir, unConfigDir),
@@ -467,9 +467,6 @@ warn ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
 warn t = asks (view doMock) ≫ \ mock → warnIO mock t
 
-warn' ∷ (MonadIO η, MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-warn' = flip runReaderT NoMock ∘ warn
-
 msg ∷ ∀ τ δ φ η . (MonadIO η, Foldable φ, Printable τ, ToBriefText τ,
                    HasDoMock δ, MonadReader δ η, MonadLog (Log MockIOClass) η) ⇒
       𝕋 → τ → φ AttrPath → η ()
@@ -604,14 +601,8 @@ collectPackages r cs pkgs =
         throwUsage $ [fmtT|packages not found in %T: %L|] c missing
       ([],pkgs'' ∷ [(Pkg,(AttrPath, (𝕄 Priority)))]) →
         case nonEmpty (snd ⊳ pkgs'') of
-          𝕵 attr_path_prios → do
-            forM (attr_path_prios)
-                 (\ (ap,p) → case p of
-                     𝕹    → warn' $ [fmt|%T|] ap
-                     𝕵 p' → warn' $ [fmt|%T (%T)|] ap p'
-                 )
-            return (config_dir, target_profile,
-                    multiMap $ swap ⊳ attr_path_prios)
+          𝕵 attr_path_prios → do return (config_dir, target_profile,
+                                         multiMap $ swap ⊳ attr_path_prios)
           𝕹 →
             throwUsage' $ intercalate " " [ "internal error: nonEmpty pkgs'"
                                           , "means this should never happen"])
