@@ -74,6 +74,7 @@ library
   -- modules included in this library but not exported.
   other-modules:    Nix
                   , Nix.Flake
+                  , Nix.Nyx.Options
                   , Nix.Profile.Manifest
                   , Nix.Paths
                   , Nix.Types

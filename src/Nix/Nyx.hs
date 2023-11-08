@@ -16,7 +16,7 @@ module Nix.Nyx
 
 import Base1T
 
-import Prelude ( Monoid, error, (*) )
+import Prelude ( error, (*) )
 
 -- aeson-plus --------------------------
 
@@ -109,21 +109,7 @@ import Natural ( length, replicate )
 
 -- optparse-applicative ----------------
 
-import Options.Applicative.Builder     ( command, eitherReader, flag, flag',
-                                         help, long, option, progDesc, short,
-                                         strArgument, subparser )
-import Options.Applicative.Builder     qualified as Builder
 import Options.Applicative.Help.Pretty ( empty, vcat )
-import Options.Applicative.Types       ( Parser )
-
--- optparse-plus -----------------------
-
-import OptParsePlus ( parseNE )
-
--- parsers -----------------------------
-
-import Text.Parser.Char        ( text )
-import Text.Parser.Combinators ( sepBy1 )
 
 -- safe --------------------------------
 
@@ -138,14 +124,8 @@ import StdMain.UsageError ( AsUsageError, throwUsage )
 
 import Data.Text ( intercalate )
 
--- text-printer ------------------------
-
-import Text.Printer qualified as P
-
 -- textual-plus ------------------------
 
-import TextualPlus                         ( TextualPlus(textual'),
-                                             parseTextual )
 import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 
 ------------------------------------------------------------
@@ -160,12 +140,15 @@ import Nix.Error            ( AsNixError, NixProgramError )
 import Nix.Flake            ( FlakePkg, FlakePkgs, archMap, flakeShowNM,
                               location, pkg, pkgFindNames', priority, ver,
                               x86_64_pkgs )
+import Nix.Nyx.Options      ( Configs(AllConfigs, SomeConfigs),
+                              Mode(ModeInstall, ModeListConfigNames, ModeListConfigs, ModeListPkgs),
+                              Options, Packages(AllPackages, SomePackages),
+                              mode, parseOptions, remote_state )
 import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
 import Nix.Types            ( Arch, ConfigDir(ConfigDir, unConfigDir),
-                              ConfigName(ConfigName, unConfigName), Pkg(Pkg),
-                              Priority(unPriority), ProfileDir,
-                              RemoteState(FullyConnected, Isolated, Remote),
+                              ConfigName(ConfigName, unConfigName), Pkg,
+                              Priority(unPriority), ProfileDir, RemoteState,
                               ToBriefText(toT) )
 import Nix.Types.AttrPath   ( AttrPath )
 
@@ -197,6 +180,60 @@ instance HomogenousTuple (α,α,α,α,α,α) where
 
 ------------------------------------------------------------
 
+class TuplePrepend α β γ where
+  type family TuplePrepended α β
+  tuplePrepend ∷ α → β → γ
+  (⨤) ∷ α → β → γ
+  (⨤) = tuplePrepend
+
+instance ∀ α β γ . TuplePrepend α (β,γ) (α,β,γ) where
+  type instance TuplePrepended α (β,γ) = (α,β,γ)
+  tuplePrepend α (β,γ) = (α,β,γ)
+
+instance ∀ α β γ δ . TuplePrepend α (β,γ,δ) (α,β,γ,δ) where
+  type instance TuplePrepended α (β,γ,δ) = (α,β,γ,δ)
+  tuplePrepend α (β,γ,δ) = (α,β,γ,δ)
+
+------------------------------------------------------------
+
+class TupleAppend α β γ where
+  type family TupleAppended α β
+  tupleAppend ∷ α → β → γ
+  (⨦) ∷ α → β → γ
+  (⨦) = tupleAppend
+
+instance ∀ α β γ . TupleAppend (α,β) γ (α,β,γ) where
+  type instance TupleAppended (α,β) γ = (α,β,γ)
+  tupleAppend (α,β) γ = (α,β,γ)
+
+instance ∀ α β γ δ . TupleAppend (α,β,γ) δ (α,β,γ,δ) where
+  type instance TupleAppended (α,β,γ) δ = (α,β,γ,δ)
+  tupleAppend (α,β,γ) δ = (α,β,γ,δ)
+
+instance ∀ α β γ δ κ . TupleAppend (α,β,γ,δ) κ (α,β,γ,δ,κ) where
+  type instance TupleAppended (α,β,γ,δ) κ = (α,β,γ,δ,κ)
+  tupleAppend (α,β,γ,δ) κ = (α,β,γ,δ,κ)
+
+instance ∀ α β γ δ κ ι . TupleAppend (α,β,γ,δ,κ) ι (α,β,γ,δ,κ,ι) where
+  type instance TupleAppended (α,β,γ,δ,κ) ι = (α,β,γ,δ,κ,ι)
+  tupleAppend (α,β,γ,δ,κ) ι = (α,β,γ,δ,κ,ι)
+
+------------------------------------------------------------
+
+(⮞) ∷ (Monad η, Traversable ψ) ⇒ (α → η β) → ψ α → η (ψ β)
+(⮞) = mapM
+
+(⮚) ∷ (Monad η, Foldable φ) ⇒ (α → η ()) → φ α → η ()
+(⮚) = mapM_
+
+(⮜) ∷ (Monad η, Traversable ψ) ⇒ ψ α → (α → η β) → η (ψ β)
+(⮜) = forM
+
+(⮘) ∷ (Monad η, Foldable φ) ⇒ φ α → (α → η ()) → η ()
+(⮘) = forM_
+
+----------------------------------------
+
 {- Given a list of lines, each being a list of columns; pad out the columns
    to provide an aligned display.
 
@@ -221,79 +258,12 @@ columnify pads zs =
   in
     (^.. each) ∘ zipWith pad_t (col_widths' ⊕ repeat 0) ⊳ zs
 
-------------------------------------------------------------
-
--- newtype PkgName = PkgName 𝕋
-data Packages = AllPackages
-              | SomePackages (NonEmpty Pkg)
-
-data Configs = AllConfigs
-             | SomeConfigs [ConfigName]
-
-data Mode = ModeListPkgs Configs -- [ConfigName]
-          | ModeListConfigs
-          | ModeListConfigNames
-          | ModeInstall [ConfigName] Packages
-
-data Options = Options { remote_state :: RemoteState
-                       , mode         :: Mode
-                       }
-
 ----------------------------------------
 
 throwUsage' ∷ ∀ ε ω η . (AsUsageError ε, MonadError ε η) ⇒ 𝕋 → η ω
 throwUsage' = throwUsage
 
-----------------------------------------
-
-newtype ConfigNames = ConfigNames { unConfigNames :: [ConfigName] }
-  deriving (Monoid, Semigroup)
-
-instance Printable ConfigNames where
-  print (ConfigNames cs) = P.text $ [fmt|%L|] cs
-
-instance TextualPlus ConfigNames where
-  textual' = ConfigNames ⊳ {- sepByNonEmpty -} sepBy1 textual' (text ",")
-
-{-| cmdline options parser -}
-parseOptions ∷ Parser Options
-parseOptions =
-  let
-    configs_option ∷ Parser [ConfigName] =
-      unConfigNames ∘ ю ⊳
-        many (option @ConfigNames (eitherReader parseTextual)
-                                   (ю [ short 'c', long "config"
-                                      , help "select config to use" ]))
-
-    configs_option' ∷ Parser Configs =
-      ( SomeConfigs ⊳ configs_option ∤ flag' AllConfigs (ю [ short 'A', long "all-configs"] ) )
-    install_parser ∷ Parser Mode
-    install_parser =
-      ModeInstall ⊳ ({- toList ∘ unConfigNames ⊳ -} configs_option)
-                  ⊵ (  (SomePackages ⊳ parseNE (Pkg ⊳ strArgument (help "package")))
-                     ∤ (flag' AllPackages (ю [ short 'a'
-                                                  , help "all packages" ])))
-
-  in
-    Options ⊳ ( flag FullyConnected Remote
-                     (ю [ short 'r', long "remote"
-                        , help "disconnected from sixears network" ])
-              ∤ flag' Isolated (ю [ short 'R', long "isolated"
-                                  , help "disconnected from all networks" ]))
-            ⊵ subparser (ю [ command "list-config-dirs"
-                                     (Builder.info (pure ModeListConfigs)
-                                      (progDesc "list config directories"))
-                           , command "list-config-names"
-                                     (Builder.info (pure ModeListConfigNames)
-                                      (progDesc "list config names"))
-                           , command "list-packages"
-                                     (Builder.info(ModeListPkgs⊳configs_option')
-                                      (progDesc "list packages"))
-                           , command "install"
-                                     (Builder.info install_parser
-                                      (progDesc "install one or more packages"))
-                           ])
-
+------------------------------------------------------------
 ------------------------------------------------------------
 
 {-| top dir to look for config flakes -}
@@ -357,42 +327,6 @@ allConfigNames = basePC ⊳⊳ allConfigDirs
                         𝕵 p → ConfigName p
 
 ----------------------------------------
-
-class TuplePrepend α β γ where
-  type family TuplePrepended α β
-  tuplePrepend ∷ α → β → γ
-  (⨤) ∷ α → β → γ
-  (⨤) = tuplePrepend
-
-instance ∀ α β γ . TuplePrepend α (β,γ) (α,β,γ) where
-  type instance TuplePrepended α (β,γ) = (α,β,γ)
-  tuplePrepend α (β,γ) = (α,β,γ)
-
-instance ∀ α β γ δ . TuplePrepend α (β,γ,δ) (α,β,γ,δ) where
-  type instance TuplePrepended α (β,γ,δ) = (α,β,γ,δ)
-  tuplePrepend α (β,γ,δ) = (α,β,γ,δ)
-
-class TupleAppend α β γ where
-  type family TupleAppended α β
-  tupleAppend ∷ α → β → γ
-  (⨦) ∷ α → β → γ
-  (⨦) = tupleAppend
-
-instance ∀ α β γ . TupleAppend (α,β) γ (α,β,γ) where
-  type instance TupleAppended (α,β) γ = (α,β,γ)
-  tupleAppend (α,β) γ = (α,β,γ)
-
-instance ∀ α β γ δ . TupleAppend (α,β,γ) δ (α,β,γ,δ) where
-  type instance TupleAppended (α,β,γ) δ = (α,β,γ,δ)
-  tupleAppend (α,β,γ) δ = (α,β,γ,δ)
-
-instance ∀ α β γ δ κ . TupleAppend (α,β,γ,δ) κ (α,β,γ,δ,κ) where
-  type instance TupleAppended (α,β,γ,δ) κ = (α,β,γ,δ,κ)
-  tupleAppend (α,β,γ,δ) κ = (α,β,γ,δ,κ)
-
-instance ∀ α β γ δ κ ι . TupleAppend (α,β,γ,δ,κ) ι (α,β,γ,δ,κ,ι) where
-  type instance TupleAppended (α,β,γ,δ,κ) ι = (α,β,γ,δ,κ,ι)
-  tupleAppend (α,β,γ,δ,κ) ι = (α,β,γ,δ,κ,ι)
 
 namePkgVersPrioSrcArch ∷ FlakePkgs → [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)]
 namePkgVersPrioSrcArch pkgs =
@@ -625,8 +559,11 @@ installFromOneConfig config_dir target_profile prio_m attr_paths = do
 
   -- we do it this way because nix profile upgrade doesn't work with
   -- our flakes; e.g.,
-  {- $ nix profile upgrade --profile /nix/var/nix/profiles/per-user/martyn/haskell /home/martyn/nix/haskell#packages.x86_64-linux.ghc
-     warning: '/home/martyn/nix/haskell#packages.x86_64-linux.ghc' does not match any packages
+  {- $ nix profile upgrade --profile \
+             /nix/var/nix/profiles/per-user/martyn/haskell \
+             /home/martyn/nix/haskell#packages.x86_64-linux.ghc
+     warning: '/home/martyn/nix/haskell#packages.x86_64-linux.ghc' \
+             does not match any packages
   -}
   -- true even if we use, e.g.,
   -- git+file:///home/martyn/nix/haskell#packages.x86_64-linux.ghc
@@ -644,46 +581,63 @@ installFromOneConfig config_dir target_profile prio_m attr_paths = do
 
 ----------------------------------------
 
-(⮞) ∷ (Monad η, Traversable ψ) ⇒ (α → η β) → ψ α → η (ψ β)
-(⮞) = mapM
+configFlakePkgs ∷ ∀ ε μ .
+                  (MonadIO μ, MonadLog (Log MockIOClass) μ,
+                   AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                   AsProcExitError ε, AsAesonError ε, AsTextualParseError ε,
+                  Printable ε, MonadError ε μ) ⇒
+     RemoteState → [ConfigDir] → μ [FlakePkgs]
+configFlakePkgs r config_dirs = (flakeShowNM r ⮞ config_dirs)
+
+{-| Given a list of `ConfigDir`, generate a list rows, each representing
+    a package from those config dirs.  Each row is:
+    name (installation name), pkg (nix package name), pkg version,
+    installation priority (if any), src (config dir in which the name/pkg is
+    defined), arch (host architecture).
+-}
+configFlakeTxts ∷ ∀ ε μ .
+                  (MonadIO μ, MonadLog (Log MockIOClass) μ,
+                   AsIOError ε, AsFPathError ε, AsCreateProcError ε,
+                   AsProcExitError ε, AsAesonError ε, AsTextualParseError ε,
+                  Printable ε, MonadError ε μ) ⇒
+     RemoteState → [ConfigDir] → μ [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)]
+configFlakeTxts r config_dirs =
+  ю ⊳ (namePkgVersPrioSrcArch ⊳⊳ configFlakePkgs r config_dirs)
 
 {-| List all the packages from a given flake -}
 mainListPkgs ∷ (MonadIO μ, MonadReader δ μ, HasDoMock δ,
                 AsAesonError ε, AsProcExitError ε, AsCreateProcError ε,
-                AsFPathError ε, AsIOError ε, AsTextualParseError ε, Printable ε,
-                MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
+                AsFPathError ε, AsIOError ε, AsTextualParseError ε,
+                Printable ε, MonadError ε μ, MonadLog (Log MockIOClass) μ) ⇒
                RemoteState → Configs → μ Word8
 mainListPkgs r AllConfigs = allConfigNames ≫ mainListPkgs r ∘ SomeConfigs
 mainListPkgs r (SomeConfigs []) = mainListPkgs r (SomeConfigs [configDefault])
 mainListPkgs r (SomeConfigs cs) = do
   config_dirs ∷ [ConfigDir] ← mapM configDirFromAbs cs
-  xs ∷ [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)] ← sortOn (view _1) ⊳ ю ⊳ (namePkgVersPrioSrcArch ⊳⊳ (flakeShowNM r ⮞ config_dirs))
+  xs ← sortOn (view _1) ⊳ configFlakeTxts r config_dirs
 
   let xs' = tupleToList ⊳ xs
-  forM_ (columnify [JustifyLeft, JustifyLeft, JustifyRight, JustifyLeft, JustifyLeft, JustifyLeft] xs')
+  forM_ (columnify [ JustifyLeft, JustifyLeft, JustifyRight,
+                     JustifyLeft, JustifyLeft, JustifyLeft ] xs')
                 (say ∘ intercalate "\t")
   return 0
 
 ----------------------------------------
 
-myMain ∷ (HasCallStack, AsNixError ε, AsIOError ε,AsFPathError ε,AsAesonError ε,
+myMain ∷ (HasCallStack,
+          AsNixError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
           AsCreateProcError ε, AsProcExitError ε, AsTextualParseError ε,
           AsUsageError ε, Printable ε) ⇒
          DoMock → Options → LoggingT (Log MockIOClass) (ExceptT ε IO) Word8
 myMain do_mock opts = flip runReaderT do_mock $
   let
-    r = remote_state opts
+    r = opts ⊣ remote_state
   in
-    case mode opts of
-    -- support -A for list-packages (list from all configs)
-    -- support -A for install
-    -- or -C?
+    case opts ⊣ mode of
       ModeListConfigs     → allConfigDirs ≫ mapM_ say ⪼ return 0
       ModeListConfigNames → allConfigNames ≫ mapM_ say ∘ sort ⪼ return 0
       ModeListPkgs cs     → mainListPkgs r cs
       ModeInstall cs ps   →
-        -- test build all the packages before we make any destructive changes to
-        -- the profile
         let installFromOneConfigs cd pd =
               mapM_ (uncurry $ installFromOneConfig cd pd) ∘ Map.toList
             concat' ∷ [NonEmpty α] → NonEmpty α
@@ -694,7 +648,6 @@ myMain do_mock opts = flip runReaderT do_mock $
 {-| program main entry point -}
 main ∷ MonadIO μ ⇒ μ ()
 main = do
--- show all configs (as option)
   let desc = vcat $ [ "manage nix configs for ~home installation", empty ]
   getArgs ≫ stdMain desc parseOptions (myMain @NixProgramError)
 
