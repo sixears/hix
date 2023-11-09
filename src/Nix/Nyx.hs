@@ -16,7 +16,7 @@ module Nix.Nyx
 
 import Base1T
 
-import Prelude ( error, (*) )
+import Prelude ( error )
 
 -- aeson-plus --------------------------
 
@@ -29,10 +29,13 @@ import Data.List.NonEmpty qualified as NonEmpty
 import Data.Foldable      ( Foldable, concat )
 import Data.Function      ( flip )
 import Data.Functor       ( Functor )
-import Data.List          ( any, intersect, repeat, sort, sortOn, transpose,
-                            zip, zipWith )
+import Data.List          ( any, intersect, sort, sortOn )
 import Data.List.NonEmpty ( nonEmpty )
 import Data.Tuple         ( swap, uncurry )
+
+-- columnify ---------------------------
+
+import Text.Columnify ( Justify(JustifyLeft, JustifyRight), columnify )
 
 -- containers --------------------------
 
@@ -55,8 +58,6 @@ import FPath.ToDir            ( ToDir(toDir) )
 
 -- lens --------------------------------
 
-import Control.Lens.Each   ( each )
-import Control.Lens.Fold   ( (^..) )
 import Control.Lens.Getter ( view )
 import Control.Lens.Tuple  ( _1 )
 
@@ -103,17 +104,13 @@ import Data.MonoTraversable ( otoList )
 
 import Control.Monad.Reader ( MonadReader, ReaderT, asks, runReaderT )
 
--- natural -----------------------------
-
-import Natural ( length, replicate )
-
 -- optparse-applicative ----------------
 
 import Options.Applicative.Help.Pretty ( empty, vcat )
 
 -- safe --------------------------------
 
-import Safe ( lastMay, maximumDef )
+import Safe ( lastMay )
 
 -- stdmain -----------------------------
 
@@ -232,6 +229,35 @@ instance ∀ α β γ δ κ ι . TupleAppend (α,β,γ,δ,κ) ι (α,β,γ,δ,κ
 (⮘) ∷ (Monad η, Foldable φ) ⇒ φ α → (α → η ()) → η ()
 (⮘) = forM_
 
+------------------------------------------------------------
+
+debug ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+debug t = asks (view doMock) ≫ \ mock → debugIO mock t
+
+info ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+info t = asks (view doMock) ≫ \ mock → infoIO mock t
+
+notice ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+notice t = asks (view doMock) ≫ \ mock → noticeIO mock t
+
+warn ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
+                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
+warn t = asks (view doMock) ≫ \ mock → warnIO mock t
+
+----------------------------------------
+
+{-| A variant of `lsdir'` that just returns the subdirectories.  For complex
+    type issues that I do not grok; it only works for `AbsDir`. -}
+subdirs ∷ ∀ ε ω μ .
+          (MonadIO μ,
+           AsFPathError ε,AsIOError ε,Printable ε,MonadError ε μ,HasCallStack,
+           HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ) ⇒
+          Severity → AbsDir → DoMock → μ [AbsDir]
+subdirs sv d k = fst ⊳⊳ snd ⊳ lsdir' @_ @AbsFile sv d k
+
 ----------------------------------------
 
 {- Given a list of lines, each being a list of columns; pad out the columns
@@ -241,10 +267,11 @@ instance ∀ α β γ δ κ ι . TupleAppend (α,β,γ,δ,κ) ι (α,β,γ,δ,κ
    are set according to the widest input column.  Columns for which no justify
    value is provided are left unmolested.
 -}
-data Justify = JustifyLeft | JustifyRight
+-- data Justify = JustifyLeft | JustifyRight
 
 -- provide fixed width args, and ignore args, and centrejustify args
 
+{-
 columnify ∷ [Justify] → [[𝕋]] → [[𝕋]]
 columnify pads zs =
   let pad_t ∷ ℤ → 𝕋 → 𝕋
@@ -257,13 +284,13 @@ columnify pads zs =
       col_widths' = (\(x,y) → fromIntegral y * xx x) ⊳ zip pads col_widths
   in
     (^.. each) ∘ zipWith pad_t (col_widths' ⊕ repeat 0) ⊳ zs
+-}
 
 ----------------------------------------
 
 throwUsage' ∷ ∀ ε ω η . (AsUsageError ε, MonadError ε η) ⇒ 𝕋 → η ω
 throwUsage' = throwUsage
 
-------------------------------------------------------------
 ------------------------------------------------------------
 
 {-| top dir to look for config flakes -}
@@ -282,17 +309,6 @@ configDir p = ConfigDir ⊳ ((⫻ fromList [unConfigName p]) ⊳ configTop)
 {-| top dir to look for config flakes -}
 configDefault ∷ ConfigName
 configDefault = ConfigName [pc|default|]
-
-----------------------------------------
-
-{-| A variant of `lsdir'` that just returns the subdirectories.  For complex
-    type issues that I do not grok; it only works for `AbsDir`. -}
-subdirs ∷ ∀ ε ω μ .
-          (MonadIO μ,
-           AsFPathError ε,AsIOError ε,Printable ε,MonadError ε μ,HasCallStack,
-           HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ) ⇒
-          Severity → AbsDir → DoMock → μ [AbsDir]
-subdirs sv d k = fst ⊳⊳ snd ⊳ lsdir' @_ @AbsFile sv d k
 
 ----------------------------------------
 
@@ -344,20 +360,6 @@ namePkgVersPrioSrcArch pkgs =
 
 ----------------------------------------
 
-natNeg ∷ ℕ → ℕ → ℕ
-natNeg x y = if x ≥ y then x - y else 0
-
-(⊖) ∷ ℕ → ℕ → ℕ
-(⊖) = natNeg
-
-data NumSign = SignPlus | SignMinus
-
-unNegate ∷ ℤ → (NumSign,ℕ)
-unNegate n | n < 0     = (SignMinus, fromIntegral $ abs n)
-           | otherwise = (SignPlus,  fromIntegral n)
-
-----------------------------------------
-
 {- | Given the name of a config (e.g., "haskell"); find the flake directory for
      that config (e.g., ~/nix/haskell/).
 
@@ -384,22 +386,6 @@ mkTargets config_dir attr_paths =
   [fmt|%T#%T|] (unConfigDir config_dir) ⊳ attr_paths
 
 ----------------------------------------
-
-debug ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-debug t = asks (view doMock) ≫ \ mock → debugIO mock t
-
-info ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-info t = asks (view doMock) ≫ \ mock → infoIO mock t
-
-notice ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-notice t = asks (view doMock) ≫ \ mock → noticeIO mock t
-
-warn ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-warn t = asks (view doMock) ≫ \ mock → warnIO mock t
 
 msg ∷ ∀ τ δ φ η . (MonadIO η, Foldable φ, Printable τ, ToBriefText τ,
                    HasDoMock δ, MonadReader δ η, MonadLog (Log MockIOClass) η) ⇒
