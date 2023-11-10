@@ -71,12 +71,13 @@ import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational, Notice) )
 
 -- mockio ------------------------------
 
-import MockIO.DoMock  ( DoMock(NoMock), HasDoMock(doMock) )
+import MockIO.DoMock  ( DoMock(NoMock), HasDoMock )
 import MockIO.IOClass ( HasIOClass )
 
 -- mockio-log --------------------------
 
-import MockIO.Log ( MockIOClass, debugIO, infoIO, noticeIO, warnIO )
+import MockIO.Log             ( MockIOClass )
+import MockIO.Log.MonadReader ( debug, info, notice, warn )
 
 -- mockio-plus -------------------------
 
@@ -102,7 +103,7 @@ import Data.MonoTraversable ( otoList )
 
 -- mtl ---------------------------------
 
-import Control.Monad.Reader ( MonadReader, ReaderT, asks, runReaderT )
+import Control.Monad.Reader ( MonadReader, ReaderT, runReaderT )
 
 -- optparse-applicative ----------------
 
@@ -231,24 +232,6 @@ instance ∀ α β γ δ κ ι . TupleAppend (α,β,γ,δ,κ) ι (α,β,γ,δ,κ
 
 ------------------------------------------------------------
 
-debug ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-debug t = asks (view doMock) ≫ \ mock → debugIO mock t
-
-info ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                  MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-info t = asks (view doMock) ≫ \ mock → infoIO mock t
-
-notice ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-notice t = asks (view doMock) ≫ \ mock → noticeIO mock t
-
-warn ∷ ∀ δ η . (MonadReader δ η, HasDoMock δ, MonadIO η,
-                 MonadLog (Log MockIOClass) η) ⇒ 𝕋 → η ()
-warn t = asks (view doMock) ≫ \ mock → warnIO mock t
-
-----------------------------------------
-
 {-| A variant of `lsdir'` that just returns the subdirectories.  For complex
     type issues that I do not grok; it only works for `AbsDir`. -}
 subdirs ∷ ∀ ε ω μ .
@@ -260,38 +243,23 @@ subdirs sv d k = fst ⊳⊳ snd ⊳ lsdir' @_ @AbsFile sv d k
 
 ----------------------------------------
 
-{- Given a list of lines, each being a list of columns; pad out the columns
-   to provide an aligned display.
-
-   The columns are padded out according to the input `pads` argument.  Widths
-   are set according to the widest input column.  Columns for which no justify
-   value is provided are left unmolested.
--}
--- data Justify = JustifyLeft | JustifyRight
-
--- provide fixed width args, and ignore args, and centrejustify args
-
-{-
-columnify ∷ [Justify] → [[𝕋]] → [[𝕋]]
-columnify pads zs =
-  let pad_t ∷ ℤ → 𝕋 → 𝕋
-      pad_t (unNegate → (SignMinus,n)) t = replicate @𝕋 (n ⊖ length t) ' ' ⊕ t
-      pad_t (unNegate → (SignPlus, n)) t = t ⊕ replicate @𝕋 (n ⊖ length t) ' '
-
-      col_widths = transpose zs & each ⊧ (\ ys → maximumDef 0 $ length ⊳ ys)
-      xx JustifyLeft  = 1
-      xx JustifyRight = (-1)
-      col_widths' = (\(x,y) → fromIntegral y * xx x) ⊳ zip pads col_widths
-  in
-    (^.. each) ∘ zipWith pad_t (col_widths' ⊕ repeat 0) ⊳ zs
--}
-
-----------------------------------------
-
 throwUsage' ∷ ∀ ε ω η . (AsUsageError ε, MonadError ε η) ⇒ 𝕋 → η ω
 throwUsage' = throwUsage
 
 ------------------------------------------------------------
+
+noMock ∷ ∀ η α . ReaderT DoMock η α → η α
+noMock = flip runReaderT NoMock
+
+----------------------------------------
+
+partitionMaybes ∷ [(α, 𝕄 β)] → ([α], [(α,β)])
+partitionMaybes = go ([],[])
+  where go (naes,yaes) []             = (naes, yaes)
+        go (naes,yaes) ((a,𝕹) : xs)   = go (a:naes, yaes) xs
+        go (naes,yaes) ((a,𝕵 b) : xs) = go (naes, (a,b) : yaes) xs
+
+----------------------------------------
 
 {-| top dir to look for config flakes -}
 configTop ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
@@ -437,19 +405,6 @@ nixProfileInstall config_dir profile prio_m attr_paths = do
                          prio_m
   nixDo 𝕹 $ ю [ [ "profile", "install", "--profile", toText profile ]
               , extra_args, toList targets ]
-
-----------------------------------------
-
-noMock ∷ ∀ η α . ReaderT DoMock η α → η α
-noMock = flip runReaderT NoMock
-
-----------------------------------------
-
-partitionMaybes ∷ [(α, 𝕄 β)] → ([α], [(α,β)])
-partitionMaybes = go ([],[])
-  where go (naes,yaes) []             = (naes, yaes)
-        go (naes,yaes) ((a,𝕹) : xs)   = go (a:naes, yaes) xs
-        go (naes,yaes) ((a,𝕵 b) : xs) = go (naes, (a,b) : yaes) xs
 
 ----------------------------------------
 
