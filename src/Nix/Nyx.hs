@@ -81,7 +81,7 @@ import MockIO.Log.MonadReader ( debug, info, notice, warn )
 
 -- mockio-plus -------------------------
 
-import MockIO.Directory ( lsdir' )
+import MockIO.Directory ( lsdir', subdirs )
 
 -- monaderror-io -----------------------
 
@@ -167,17 +167,6 @@ import Nix.Types.AttrPath   ( AttrPath )
 
 (⮘) ∷ (Monad η, Foldable φ) ⇒ φ α → (α → η ()) → η ()
 (⮘) = forM_
-
-------------------------------------------------------------
-
-{-| A variant of `lsdir'` that just returns the subdirectories.  For complex
-    type issues that I do not grok; it only works for `AbsDir`. -}
-subdirs ∷ ∀ ε ω μ .
-          (MonadIO μ,
-           AsFPathError ε,AsIOError ε,Printable ε,MonadError ε μ,HasCallStack,
-           HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ) ⇒
-          Severity → AbsDir → DoMock → μ [AbsDir]
-subdirs sv d k = fst ⊳⊳ snd ⊳ lsdir' @_ @AbsFile sv d k
 
 ----------------------------------------
 
