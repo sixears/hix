@@ -71,6 +71,7 @@ import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational, Notice) )
 
 -- mockio ------------------------------
 
+import MockIO         ( noMock )
 import MockIO.DoMock  ( DoMock(NoMock), HasDoMock )
 import MockIO.IOClass ( HasIOClass )
 
@@ -101,9 +102,13 @@ import MonadIO.User                  ( homePath )
 
 import Data.MonoTraversable ( otoList )
 
+-- more-unicode ------------------------
+
+import Data.MoreUnicode.Monad ( (⮞) )
+
 -- mtl ---------------------------------
 
-import Control.Monad.Reader ( MonadReader, ReaderT, runReaderT )
+import Control.Monad.Reader ( MonadReader, runReaderT )
 
 -- optparse-applicative ----------------
 
@@ -156,29 +161,10 @@ import Nix.Types.AttrPath   ( AttrPath )
 
 --------------------------------------------------------------------------------
 
-(⮞) ∷ (Monad η, Traversable ψ) ⇒ (α → η β) → ψ α → η (ψ β)
-(⮞) = mapM
-
-(⮚) ∷ (Monad η, Foldable φ) ⇒ (α → η ()) → φ α → η ()
-(⮚) = mapM_
-
-(⮜) ∷ (Monad η, Traversable ψ) ⇒ ψ α → (α → η β) → η (ψ β)
-(⮜) = forM
-
-(⮘) ∷ (Monad η, Foldable φ) ⇒ φ α → (α → η ()) → η ()
-(⮘) = forM_
-
-----------------------------------------
-
 throwUsage' ∷ ∀ ε ω η . (AsUsageError ε, MonadError ε η) ⇒ 𝕋 → η ω
 throwUsage' = throwUsage
 
 ------------------------------------------------------------
-
-noMock ∷ ∀ η α . ReaderT DoMock η α → η α
-noMock = flip runReaderT NoMock
-
-----------------------------------------
 
 partitionMaybes ∷ [(α, 𝕄 β)] → ([α], [(α,β)])
 partitionMaybes = go ([],[])
