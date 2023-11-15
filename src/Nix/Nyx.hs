@@ -16,20 +16,15 @@ module Nix.Nyx
 
 import Base1T
 
-import Prelude ( error )
-
 -- aeson-plus --------------------------
 
 import Data.Aeson.Error ( AsAesonError )
 
 -- base --------------------------------
 
-import Data.List.NonEmpty qualified as NonEmpty
-
 import Data.Foldable      ( Foldable, concat )
 import Data.Function      ( flip )
-import Data.Functor       ( Functor )
-import Data.List          ( any, intersect, sort, sortOn )
+import Data.List          ( intersect, sort, sortOn )
 import Data.List.NonEmpty ( nonEmpty )
 import Data.Tuple         ( swap, uncurry )
 
@@ -43,18 +38,7 @@ import Data.Map.Strict qualified as Map
 
 -- fpath -------------------------------
 
-import FPath.Abs              ( Abs(AbsD, AbsF) )
-import FPath.AbsDir           ( AbsDir )
-import FPath.AbsFile          ( AbsFile )
-import FPath.AppendableFPath  ( (⫻) )
-import FPath.Basename         ( basename )
-import FPath.Dirname          ( dirname )
 import FPath.Error.FPathError ( AsFPathError )
-import FPath.Parseable        ( Parseable(parse) )
-import FPath.PathComponent    ( PathComponent, pc )
-import FPath.RelDir           ( reldir )
-import FPath.RelFile          ( relfile )
-import FPath.ToDir            ( ToDir(toDir) )
 
 -- lens --------------------------------
 
@@ -67,22 +51,17 @@ import Log ( Log )
 
 -- logging-effect ----------------------
 
-import Control.Monad.Log ( LoggingT, MonadLog, Severity(Informational, Notice) )
+import Control.Monad.Log ( LoggingT, MonadLog, Severity(Notice) )
 
 -- mockio ------------------------------
 
-import MockIO         ( noMock )
-import MockIO.DoMock  ( DoMock(NoMock), HasDoMock )
-import MockIO.IOClass ( HasIOClass )
+import MockIO        ( noMock )
+import MockIO.DoMock ( DoMock, HasDoMock )
 
 -- mockio-log --------------------------
 
 import MockIO.Log             ( MockIOClass )
-import MockIO.Log.MonadReader ( debug, info, notice, warn )
-
--- mockio-plus -------------------------
-
-import MockIO.Directory ( lsdir', subdirs )
+import MockIO.Log.MonadReader ( debug, info )
 
 -- monaderror-io -----------------------
 
@@ -94,13 +73,6 @@ import MonadIO                       ( say )
 import MonadIO.Base                  ( getArgs )
 import MonadIO.Error.CreateProcError ( AsCreateProcError )
 import MonadIO.Error.ProcExitError   ( AsProcExitError )
-import MonadIO.FPath                 ( pResolve )
-import MonadIO.FStat                 ( isDir )
-import MonadIO.User                  ( homePath )
-
--- mono-traversable --------------------
-
-import Data.MonoTraversable ( otoList )
 
 -- more-unicode ------------------------
 
@@ -114,14 +86,10 @@ import Control.Monad.Reader ( MonadReader, runReaderT )
 
 import Options.Applicative.Help.Pretty ( empty, vcat )
 
--- safe --------------------------------
-
-import Safe ( lastMay )
-
 -- stdmain -----------------------------
 
 import StdMain            ( stdMain )
-import StdMain.UsageError ( AsUsageError, throwUsage )
+import StdMain.UsageError ( AsUsageError, throwUsageT )
 
 -- text --------------------------------
 
@@ -133,191 +101,35 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 
 -- tuple-plus --------------------------
 
-import Data.TuplePlus ( tupleToList, (⨤), (⨦) )
+import Data.TuplePlus ( tupleToList )
 
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix ( nixDo )
-
-import Nix.Types.AttrPath qualified as AttrPath
-
 import Nix.Error            ( AsNixError, NixProgramError )
-import Nix.Flake            ( FlakePkg, FlakePkgs, archMap, flakeShowNM,
-                              location, pkg, pkgFindNames', priority, ver,
-                              x86_64_pkgs )
+import Nix.Flake            ( FlakePkgs, flakeShowNM, namePkgVersPrioSrcArch,
+                              pkgFindNames', x86_64_pkgs )
+import Nix.NixExe           ( nixBuild, nixProfileInstall, nixProfileRemove )
 import Nix.Nyx.Options      ( Configs(AllConfigs, SomeConfigs),
                               Mode(ModeInstall, ModeListConfigNames, ModeListConfigs, ModeListPkgs),
                               Options, Packages(AllPackages, SomePackages),
                               mode, parseOptions, remote_state )
 import Nix.Profile          ( nixProfileAbsDir )
 import Nix.Profile.Manifest ( attrPaths, readManifestDir )
-import Nix.Types            ( Arch, ConfigDir(ConfigDir, unConfigDir),
-                              ConfigName(ConfigName, unConfigName), Pkg,
-                              Priority(unPriority), ProfileDir, RemoteState,
-                              ToBriefText(toT) )
+import Nix.Types            ( Pkg, Priority, ProfileDir, RemoteState )
 import Nix.Types.AttrPath   ( AttrPath )
+import Nix.Types.ConfigDir  ( ConfigDir, allConfigDirs, allConfigNames,
+                              configDirFromAbs )
+import Nix.Types.ConfigName ( ConfigName(unConfigName), configDefault )
 
 --------------------------------------------------------------------------------
-
-throwUsage' ∷ ∀ ε ω η . (AsUsageError ε, MonadError ε η) ⇒ 𝕋 → η ω
-throwUsage' = throwUsage
-
-------------------------------------------------------------
 
 partitionMaybes ∷ [(α, 𝕄 β)] → ([α], [(α,β)])
 partitionMaybes = go ([],[])
   where go (naes,yaes) []             = (naes, yaes)
         go (naes,yaes) ((a,𝕹) : xs)   = go (a:naes, yaes) xs
         go (naes,yaes) ((a,𝕵 b) : xs) = go (naes, (a,b) : yaes) xs
-
-----------------------------------------
-
-{-| top dir to look for config flakes -}
-configTop ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
-            μ AbsDir
-configTop = homePath [reldir|nix/|]
-
-----------------------------------------
-
-configDir ∷ (MonadIO μ, AsIOError ε, AsFPathError ε, MonadError ε μ) ⇒
-            ConfigName → μ ConfigDir
-configDir p = ConfigDir ⊳ ((⫻ fromList [unConfigName p]) ⊳ configTop)
-
-----------------------------------------
-
-{-| top dir to look for config flakes -}
-configDefault ∷ ConfigName
-configDefault = ConfigName [pc|default|]
-
-----------------------------------------
-
-{-| list of config directories; that is, dirs in `configTop` that contain a
-    @flake.nix@ -}
-allConfigDirs ∷ (MonadIO μ,
-              HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ,
-              AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ) ⇒
-             μ [AbsDir]
-allConfigDirs = do
-  config_top  ← configTop
-  let has_flake ∷ (MonadIO μ,
-                   AsFPathError ε, AsIOError ε, Printable ε, MonadError ε μ,
-                   HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ) ⇒
-                  AbsDir → μ 𝔹
-      has_flake d  = do
-        (fs,_) ← lsdir' @_ @AbsFile Informational d NoMock
-        return $ any (\ (fn, _) → [relfile|flake.nix|] ≡ basename fn) fs
-  subdirs Informational config_top NoMock ≫ filterM has_flake
-
-
-----------------------------------------
-
-allConfigNames ∷ (MonadIO μ,
-                  HasDoMock ω, HasIOClass ω, Default ω, MonadLog (Log ω) μ,
-                  AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ) ⇒
-                 μ [ConfigName]
-allConfigNames = basePC ⊳⊳ allConfigDirs
-  where basePC ∷ AbsDir → ConfigName
-        basePC dir = case lastMay ∘ otoList $ basename dir of
-                        𝕹   → error $ [fmt|could not find ConfigName of %T|] dir
-                        𝕵 p → ConfigName p
-
-----------------------------------------
-
-namePkgVersPrioSrcArch ∷ FlakePkgs → [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)]
-namePkgVersPrioSrcArch pkgs =
-  let
-    pkgVer ∷ FlakePkg → (𝕋,𝕋,𝕋)
-    pkgVer fp = (toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver,
-                 maybe "" toText $ fp ⊣ priority)
-
-    go ∷ Pkg → FlakePkg → [(𝕋,𝕋,𝕋,𝕋,𝕋)]
-    go p fp = [(toText p ⨤ (pkgVer fp) ∷ (𝕋,𝕋,𝕋,𝕋)) ⨦ toText (pkgs ⊣ location)]
-    go' ∷ Arch → Map.Map Pkg FlakePkg → [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)]
-    go' arch fpmap = (⨦ (toText arch)) ⊳ Map.foldMapWithKey go fpmap
-  in
-    Map.foldMapWithKey go' (pkgs ⊣ archMap)
-
-----------------------------------------
-
-{- | Given the name of a config (e.g., "haskell"); find the flake directory for
-     that config (e.g., ~/nix/haskell/).
-
-     If f is a file type then if it is a dir on disc convert it else issue a
-     warning and use the base dir; if f is a dir, use that.
--}
-
-configDirFromAbs ∷ (MonadIO μ, Printable ε,
-                    AsFPathError ε, AsIOError ε, MonadError ε μ)⇒
-                   ConfigName → μ ConfigDir
-configDirFromAbs f = do
-  pResolve f ≫ \ case
-    AbsD d → return $ ConfigDir d
-    AbsF f' → isDir f' ≫ \ case
-      𝕿 → return ∘ ConfigDir $ toDir f'
-      𝕱 → if basename f' ≡ [relfile|flake.nix|]
-          then return ∘ ConfigDir $ f' ⊣ dirname
-          else parse @PathComponent f ≫ configDir ∘ ConfigName
-
-----------------------------------------
-
-mkTargets ∷ (Functor φ, Printable τ) ⇒ ConfigDir → φ τ → φ 𝕋
-mkTargets config_dir attr_paths =
-  [fmt|%T#%T|] (unConfigDir config_dir) ⊳ attr_paths
-
-----------------------------------------
-
-msg ∷ ∀ τ δ φ η . (MonadIO η, Foldable φ, Printable τ, ToBriefText τ,
-                   HasDoMock δ, MonadReader δ η, MonadLog (Log MockIOClass) η) ⇒
-      𝕋 → τ → φ AttrPath → η ()
-msg verb object attr_paths = do
-  let names = sort $ toText ∘ view AttrPath.pkg ⊳ toList attr_paths
-  warn $ [fmt|%t (%t): %L|] verb (toT object) names
-  notice $ [fmt|%t: (%T) %L|] verb object attr_paths
-
-----------------------------------------
-
-nixBuild ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
-                      AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                      AsProcExitError ε, Printable ε, MonadError ε μ,
-                      MonadLog (Log MockIOClass) μ) ⇒
-           ConfigDir → NonEmpty AttrPath → μ ()
-nixBuild config_dir attr_paths = do
-  msg "building" config_dir attr_paths
-  let targets = mkTargets config_dir attr_paths
-  nixDo 𝕹 $ [ "build", "--log-format", "bar-with-logs", "--no-link" ] ⊕
-             (toList targets)
-
-----------------------------------------
-
-nixProfileRemove ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
-                              AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                              AsProcExitError ε, Printable ε, MonadError ε μ,
-                              MonadLog (Log MockIOClass) μ) ⇒
-                   ProfileDir → [AttrPath] → μ ()
-nixProfileRemove _ [] = return ()
-nixProfileRemove profile attr_paths = do
-  msg "removing" profile attr_paths
-  nixDo 𝕹 $ ["profile", "remove", "--verbose", "--profile", toText profile] ⊕
-             (toText ⊳ attr_paths)
-
-----------------------------------------
-
-nixProfileInstall ∷ ∀ ε δ μ .
-                    (MonadIO μ, MonadReader δ μ, HasDoMock δ,
-                     AsIOError ε, AsFPathError ε, AsCreateProcError ε,
-                     AsProcExitError ε, Printable ε, MonadError ε μ,
-                     MonadLog (Log MockIOClass) μ) ⇒
-                    ConfigDir → ProfileDir → 𝕄 Priority→NonEmpty AttrPath→μ ()
-nixProfileInstall config_dir profile prio_m attr_paths = do
-  let verb = maybe "" [fmt| «prio %T»|] prio_m
-  msg ("installing" ◇ verb) (config_dir, profile) (NonEmpty.sort attr_paths)
-  let targets = mkTargets config_dir attr_paths
-  let extra_args = maybe [] (\ p → ["--priority", [fmt|%d|] (unPriority p)])
-                         prio_m
-  nixDo 𝕹 $ ю [ [ "profile", "install", "--profile", toText profile ]
-              , extra_args, toList targets ]
 
 ----------------------------------------
 
@@ -380,19 +192,19 @@ collectPackages r cs pkgs =
         SomePackages ps → return ps
         AllPackages →
           case nonEmpty $ x86_64_pkgs flkPkgs of
-            𝕹    → throwUsage' $ [fmt|no packages found: %T|] config_dir
+            𝕹    → throwUsageT $ [fmt|no packages found: %T|] config_dir
             𝕵 ps → return ps
     partitionMaybes ∘ toList ⊳ pkgFindNames' flkPkgs pkgs' ≫ \ case
       (missing:[],_) →
-        throwUsage $ [fmtT|package not found in %T: %T|] c missing
+        throwUsageT $ [fmt|package not found in %T: %T|] c missing
       (missing@(_:_:_),_) →
-        throwUsage $ [fmtT|packages not found in %T: %L|] c missing
+        throwUsageT $ [fmt|packages not found in %T: %L|] c missing
       ([],pkgs'' ∷ [(Pkg,(AttrPath, (𝕄 Priority)))]) →
         case nonEmpty (snd ⊳ pkgs'') of
           𝕵 attr_path_prios → do return (config_dir, target_profile,
                                          multiMap $ swap ⊳ attr_path_prios)
           𝕹 →
-            throwUsage' $ intercalate " " [ "internal error: nonEmpty pkgs'"
+            throwUsageT $ intercalate " " [ "internal error: nonEmpty pkgs'"
                                           , "means this should never happen"])
 
 
@@ -413,7 +225,7 @@ installFromOneConfig config_dir target_profile prio_m attr_paths = do
 
   -- we do it this way because nix profile upgrade doesn't work with
   -- our flakes; e.g.,
-  {- $ nix profile upgrade --profile \
+  {- nix profile upgrade --profile \
              /nix/var/nix/profiles/per-user/martyn/haskell \
              /home/martyn/nix/haskell#packages.x86_64-linux.ghc
      warning: '/home/martyn/nix/haskell#packages.x86_64-linux.ghc' \
@@ -440,7 +252,7 @@ configFlakePkgs ∷ ∀ ε μ .
                    AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                    AsProcExitError ε, AsAesonError ε, AsTextualParseError ε,
                   Printable ε, MonadError ε μ) ⇒
-     RemoteState → [ConfigDir] → μ [FlakePkgs]
+                  RemoteState → [ConfigDir] → μ [FlakePkgs]
 configFlakePkgs r config_dirs = (flakeShowNM r ⮞ config_dirs)
 
 {-| Given a list of `ConfigDir`, generate a list rows, each representing

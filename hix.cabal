@@ -10,7 +10,7 @@ name:                hix
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.0.2.0
+version:             0.1.0.0
 
 -- A short (one-line) description of the package.
 synopsis:            nix library for haskell, with utilities
@@ -50,6 +50,7 @@ library
   ghc-options:      -W -Wall -fhelpful-errors
   default-extensions: DeriveGeneric
                     , FlexibleContexts
+                    , FlexibleInstances
                     , GeneralizedNewtypeDeriving
                     , ImportQualifiedPost
                     , LambdaCase
@@ -61,26 +62,31 @@ library
                     , TupleSections
                     , TypeApplications
                     , TypeFamilies
+                    , TypeSynonymInstances
                     , UnicodeSyntax
                     , ViewPatterns
 
   -- Modules exported by the library.
   exposed-modules:  Nix.Error
                   , Nix.Profile.Members
-                  -- , Nix.Nyx
                   , Nix.T.Nix
                   , Nix.Nyx
 
   -- modules included in this library but not exported.
-  other-modules:    Nix
-                  , Nix.Flake
+  other-modules:    Nix.Flake
+                  , Nix.NixExe
                   , Nix.Nyx.Options
+                  , Nix.Profile
                   , Nix.Profile.Manifest
                   , Nix.Paths
                   , Nix.Types
                   , Nix.Types.AttrPath
+                  , Nix.Types.ConfigName
+                  , Nix.Types.ConfigDir
+                  , Nix.Types.FlakePkgs
                   , Nix.Types.Manifest
                   , Nix.Types.StorePath
+                  , Nix.Types.ToBriefText
 
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:

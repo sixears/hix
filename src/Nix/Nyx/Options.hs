@@ -40,8 +40,9 @@ import TextualPlus ( TextualPlus(textual'), parseTextual )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Types ( ConfigName, Pkg(Pkg),
-                   RemoteState(FullyConnected, Isolated, Remote) )
+import Nix.Types            ( Pkg(Pkg),
+                              RemoteState(FullyConnected, Isolated, Remote) )
+import Nix.Types.ConfigName ( ConfigName )
 
 --------------------------------------------------------------------------------
 

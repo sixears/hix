@@ -2,7 +2,6 @@
 module Nix.Flake
   ( FlakePkg
   , FlakePkgs
-  , HasArchFlakePkgMap(archMap)
   , flakePkgMap
   , flakePkgMap'
   , flakeShow
@@ -11,6 +10,7 @@ module Nix.Flake
   , forMX86_64Pkg_
   , forX86_64Pkg
   , location
+  , namePkgVersPrioSrcArch
   , pkg
   , pkgFindNames
   , pkgFindNames'
@@ -28,11 +28,9 @@ import Base1T
 
 import Data.Aeson ( eitherDecodeStrict' )
 
-import Data.Aeson.Types as AesonTypes
-
 -- aeson-plus --------------------------
 
-import Data.Aeson.Error ( AsAesonError, throwAsAesonError )
+import Data.Aeson.Error ( AsAesonError )
 
 -- base --------------------------------
 
@@ -40,7 +38,6 @@ import Control.Monad.Fail ( MonadFail(fail) )
 import Data.Function      ( flip )
 import Data.Maybe         ( catMaybes, fromMaybe )
 import Data.Tuple         ( uncurry )
-import GHC.Generics       ( Generic )
 
 -- containers --------------------------
 
@@ -50,7 +47,6 @@ import Data.Map.Strict qualified as Map
 
 import FPath.AbsFile          ( AbsFile )
 import FPath.AppendableFPath  ( (⫻) )
-import FPath.AsFilePath       ( filepath )
 import FPath.Error.FPathError ( AsFPathError )
 import FPath.File             ( File, FileAs )
 import FPath.RelFile          ( relfile )
@@ -78,14 +74,12 @@ import MockIO.Log     ( HasDoMock, MockIOClass )
 
 -- mockio-plus -------------------------
 
-import MockIO.OpenFile          ( readFileY )
-import MockIO.Process.MLCmdSpec ( MLCmdSpec, mock_value )
+import MockIO.OpenFile ( readFileY )
 
 -- monadio-plus ------------------------
 
 import MonadIO.Error.CreateProcError ( AsCreateProcError )
 import MonadIO.Error.ProcExitError   ( AsProcExitError )
-import MonadIO.Process.ExitStatus    ( ExitStatus, evOK )
 
 -- more-unicode ------------------------
 
@@ -101,7 +95,7 @@ import Text.Parser.Char ( char )
 
 -- text --------------------------------
 
-import Data.Text          ( concat, intercalate, pack )
+import Data.Text          ( intercalate )
 import Data.Text.Encoding ( encodeUtf8 )
 
 -- text-printer ------------------------
@@ -110,129 +104,30 @@ import Text.Printer qualified as P
 
 -- textual-plus ------------------------
 
-import TextualPlus                         ( TextualPlus(textual'), parseTextM,
-                                             tparse )
+import TextualPlus                         ( TextualPlus(textual'), tparse )
 import TextualPlus.Error.TextualParseError ( AsTextualParseError )
+
+-- tuple-plus --------------------------
+
+import Data.TuplePlus ( (⨤), (⨦) )
 
 ------------------------------------------------------------
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix                ( nixDo )
-import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
-                            throwAsNixDuplicatePkgError,
-                            throwAsNixErrorDuplicatePkg )
-import Nix.Types          ( Arch, ConfigDir(unConfigDir), Pkg, Priority,
-                            RemoteState, Ver, remoteArgs, unPkgMVer, unPriority,
-                            x86_64Linux )
-import Nix.Types.AttrPath ( AttrPath, mkAttrPath )
+import Nix.Error           ( AsNixDuplicatePkgError, AsNixError,
+                             throwAsNixDuplicatePkgError,
+                             throwAsNixErrorDuplicatePkg )
+import Nix.NixExe          ( nixFlakeShow )
+import Nix.Types           ( Arch, Pkg, Priority, RemoteState, unPriority,
+                             x86_64Linux )
+import Nix.Types.AttrPath  ( AttrPath, mkAttrPath )
+import Nix.Types.ConfigDir ( ConfigDir(unConfigDir) )
+import Nix.Types.FlakePkgs ( FlakePkg, FlakePkgs, FlakePkgs'(FlakePkgs'),
+                             archMap, flakeShowTestInput, flakeShowTestMap,
+                             location, packages, pkg, priority, ver )
 
 --------------------------------------------------------------------------------
-
-data FlakePkg = FlakePkg { _description :: 𝕄 𝕋
-                         , _pkg         :: Pkg
-                         , _ver         :: 𝕄 Ver
-                         , _type        :: 𝕋
-                           -- priority isn't really in the flake, it's in our
-                           -- own flake.priorities
-                         , _priority    :: 𝕄 Priority
-                         }
-  deriving (Eq, Generic, Show)
-
-pkg ∷ Lens' FlakePkg Pkg
-pkg = lens _pkg (\ fp p → (fp { _pkg = p }))
-
-ver ∷ Lens' FlakePkg (𝕄 Ver)
-ver = lens _ver (\ fp v → (fp { _ver = v }))
-
-priority ∷ Lens' FlakePkg (𝕄 Priority)
-priority = lens _priority (\ fp p → (fp { _priority = p }))
-
-pkgVer ∷ FlakePkg → 𝕋
-pkgVer f =
-  let p = toText $ f ⊣ pkg
-  in  case f ⊣ ver of
-        𝕹   → p
-        𝕵 v → [fmt|%t-%T|] p v
-
-instance FromJSON FlakePkg where
-  parseJSON =
-    withObject "FlakePkg" $
-    \ v → do
-          name ← v .: "name"
-{-
-          (p,vers) ← parseT ((,) ⊳ textual' ⊵ optional (char '-' ⋫ textual'))
-                            "(Pkg,𝕄 Ver)" (unpack name)
--}
-          (p,vers) ← unPkgMVer ⊳ parseTextM "PkgMVer" name
---            Parsed _ → _
-          FlakePkg ⊳ v .:? "description" ⊵ return p ⊵ return vers ⊵ v .: "type"
-                   -- when reading the flake show output, priority is always 𝕹
-                   -- as we read this from flake.priorities
-                   ⊵ pure 𝕹
-instance Printable FlakePkg where
-  print = P.text ∘ pkgVer
-
-------------------------------------------------------------
-
-type Map = Map.Map
-
-newtype FlakePkgs' = FlakePkgs' { unFlakePkgs' :: Map Arch (Map Pkg FlakePkg) }
-  deriving (Eq, Generic, Show)
-
-instance FromJSON FlakePkgs' where
-  parseJSON =
-    withObject "FlakePkgs'" $ \ v →
-    {- let customOptions ∷ AesonTypes.Options
-        customOptions =
-          let dropLeadingUnderscore ('_' : s) = s
-              dropLeadingUnderscore s         = s
-          in  defaultOptions { fieldLabelModifier = dropLeadingUnderscore }
-    in -} FlakePkgs' ⊳ v .: "packages"
-
-
-class HasArchFlakePkgMap α where
-  archMap ∷ Lens' α (Map Arch (Map Pkg FlakePkg))
-
-instance HasArchFlakePkgMap (Map Arch (Map Pkg FlakePkg)) where
-  archMap = id
-
-instance HasArchFlakePkgMap FlakePkgs' where
-  archMap = lens unFlakePkgs' (\ _ m → FlakePkgs' m)
-
-{-
-updatePriorities' ∷ PkgPriorities → FlakePkgs' → FlakePkgs'
-updatePriorities' pkgprios (FlakePkgs' fps) =
-  FlakePkgs' (Map.map (Map.map undefined) fps)
--}
-
---------------------
-
-data FlakePkgs = FlakePkgs { _location :: ConfigDir
-                           , _packages :: FlakePkgs'
-                           }
-  deriving (Show)
-
-location ∷ Lens' FlakePkgs ConfigDir
-location = lens _location (\ fp l → fp { _location = l })
-
-packages ∷ Lens' FlakePkgs (Map.Map Arch (Map.Map Pkg FlakePkg))
-packages = lens (unFlakePkgs' ∘ _packages)
-                (\ p f → (p { _packages = FlakePkgs' f }))
-
-instance HasArchFlakePkgMap FlakePkgs where
-  archMap = packages ∘ archMap
-
-instance Printable FlakePkgs where
-  print fp =
-    let namePkg ∷ Arch → (Map.Map Pkg FlakePkg) → [𝕋]
-        namePkg arch pkgs = [ [fmt|packages.%T.%T|] arch p
-                              | (p,_) ← Map.toList pkgs ]
-    in P.text $
-    intercalate " ⫽ " [ intercalate "," (namePkg arch pkgs)
-                        | (arch,pkgs) ← Map.toList (fp ⊣ packages) ]
-
-----------------------------------------
 
 updatePriorities ∷ PkgPriorities → FlakePkgs → FlakePkgs
 updatePriorities (PkgPriorities pps) fps =
@@ -243,7 +138,7 @@ updatePriorities (PkgPriorities pps) fps =
 ----------------------------------------
 
 locFile ∷ FlakePkgs → AbsFile
-locFile fp = (unConfigDir $ _location fp) ⫻ [relfile|flake.nix|]
+locFile fp = (unConfigDir $ fp ⊣ location) ⫻ [relfile|flake.nix|]
 
 ----------------------------------------
 
@@ -259,15 +154,12 @@ x86_64_ ∷ Lens' FlakePkgs (Map.Map Pkg FlakePkg)
 x86_64_ = go x86_64Linux
   where go ∷ Arch → Lens' FlakePkgs (Map.Map Pkg FlakePkg)
         go a =
-          let pkgs ∷ Lens' FlakePkgs (Map.Map Arch (Map.Map Pkg FlakePkg))
-              pkgs = lens (unFlakePkgs' ∘ _packages)
-                          (\ p f → (p { _packages = FlakePkgs' f }))
-              f1 ∷ Map.Map Arch (Map.Map Pkg FlakePkg) → Map.Map Pkg FlakePkg
+          let f1 ∷ Map.Map Arch (Map.Map Pkg FlakePkg) → Map.Map Pkg FlakePkg
               f1 fps = fromMaybe Map.empty $ a `Map.lookup` fps
               f2 ∷ Map.Map Arch (Map.Map Pkg FlakePkg) → Map.Map Pkg FlakePkg
                  → Map.Map Arch (Map.Map Pkg FlakePkg)
               f2 fps new = Map.insert a new fps
-          in  pkgs ∘ (lens f1 f2)
+          in  packages ∘ (lens f1 f2)
 
 ----------------------------------------
 
@@ -344,61 +236,6 @@ pkgFindNames' = pkgFindNames_ pkgFindName'
 
 ----------------------------------------
 
-flakeShowTestInput ∷ 𝕋
-flakeShowTestInput =
-  concat [ "{ \"packages\": {"
-         , "    \"x86_64-linux\": {"
-
-         , "      \"binutils\": {"
-         , "        \"description\": \"MOCK MOCK MOCK\","
-         , "        \"name\": \"binutils-wrapper-2.38\","
-         , "        \"type\": \"derivation\""
-         , "      },"
-
-         , "      \"get-iplayer-config\": {"
-         , "        \"name\": \"get-iplayer-config\","
-         , "        \"type\": \"derivation\""
-         , "      },"
-
-         , "      \"graph-easy\": {"
-         , "        \"description\": \"MOCK MOCKETY MOCK\","
-         , "        \"name\": \"perl5.34.1-Graph-Easy-0.76\","
-         , "        \"type\": \"derivation\""
-         , "      }"
-
-         , "    }"
-         , "  }"
-         , "}"
-         ]
-
---------------------
-
-flakeShowTestMap ∷ Map.Map Pkg FlakePkg
-flakeShowTestMap = fromList [ ("binutils",
-                               FlakePkg { _description = 𝕵 "MOCK MOCK MOCK"
-                                        , _pkg = "binutils-wrapper"
-                                        , _ver = Just "2.38"
-                                        , _type = "derivation"
-                                        , _priority = 𝕹
-                                        })
-                            , ("get-iplayer-config",
-                               FlakePkg { _description = 𝕹
-                                        , _pkg = "get-iplayer-config"
-                                        , _ver = 𝕹
-                                        , _type = "derivation"
-                                        , _priority = 𝕹
-                                        })
-                            , ("graph-easy",
-                               FlakePkg { _description = 𝕵 "MOCK MOCKETY MOCK"
-                                        , _pkg = "perl5.34.1-Graph-Easy"
-                                        , _ver = 𝕵 "0.76"
-                                        , _type = "derivation"
-                                        , _priority = 𝕹
-                                        })
-                            ]
-
-----------------------------------------
-
 {-| nix flake show #flake -}
 flakeShow ∷ ∀ ε δ μ .
             (MonadIO μ, HasDoMock δ, MonadReader δ μ,
@@ -408,19 +245,9 @@ flakeShow ∷ ∀ ε δ μ .
              MonadLog (Log MockIOClass) μ) ⇒
             RemoteState → ConfigDir → μ FlakePkgs
 flakeShow r d = do
-  let eAsAesonError ∷ (Printable τ,AsAesonError ε,MonadError ε η) ⇒ 𝔼 τ β → η β
-      eAsAesonError = either throwAsAesonError return
-      mock_set ∷ MLCmdSpec 𝕋 → MLCmdSpec 𝕋
-      mock_set = let mock_val ∷ (ExitStatus, 𝕋) = (evOK, flakeShowTestInput)
-                 in  (& mock_value ⊢ mock_val)
-      args     = ю [ ["flake", "show", "--json" ]
-                   , remoteArgs r
-                   , [ pack $ (unConfigDir d) ⫥ filepath ] ]
---  (_,flake_show) ← ꙩ (Paths.nix, args, [ӭ (ә "NIX_CONFIG")], mock_set)
-  flake_show ← nixDo (𝕵 mock_set) args
-  x ∷ FlakePkgs ← eAsAesonError (FlakePkgs d ⊳ eitherDecodeStrict' (encodeUtf8 flake_show))
+  flake_pkgs ← nixFlakeShow r d
   prios ← readPriorities (priosFile d)
-  return (updatePriorities prios x)
+  return (updatePriorities prios flake_pkgs)
 
 ----------------------------------------
 
@@ -535,6 +362,22 @@ x86_64_pkgs ∷ FlakePkgs → [Pkg]
 x86_64_pkgs fp = case x86_64 fp of
                    𝕹   → []
                    𝕵 m → Map.keys m
+
+----------------------------------------
+
+namePkgVersPrioSrcArch ∷ FlakePkgs → [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)]
+namePkgVersPrioSrcArch pkgs =
+  let
+    pkg_ver ∷ FlakePkg → (𝕋,𝕋,𝕋)
+    pkg_ver fp = (toText $ fp ⊣ pkg, maybe "" toText $ fp ⊣ ver,
+                  maybe "" toText $ fp ⊣ priority)
+
+    go ∷ Pkg → FlakePkg → [(𝕋,𝕋,𝕋,𝕋,𝕋)]
+    go p fp = [(toText p ⨤ (pkg_ver fp) ∷ (𝕋,𝕋,𝕋,𝕋)) ⨦ toText (pkgs ⊣ location)]
+    go' ∷ Arch → Map.Map Pkg FlakePkg → [(𝕋,𝕋,𝕋,𝕋,𝕋,𝕋)]
+    go' arch fpmap = (⨦ (toText arch)) ⊳ Map.foldMapWithKey go fpmap
+  in
+    Map.foldMapWithKey go' (pkgs ⊣ archMap)
 
 -- tests -----------------------------------------------------------------------
 
