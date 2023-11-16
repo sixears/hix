@@ -1,4 +1,7 @@
--- add Handle for default profile (~/.nix-profile)
+-- add version-based upgrading semantic
+-- add handling of different architectures
+
+-- add Handle for default profile (~/.nix-profile) (make it a required arg)
 -- add nix-install, nix-search equivs
 
 {-# LANGUAGE ImportQualifiedPost   #-}
