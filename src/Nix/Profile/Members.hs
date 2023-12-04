@@ -122,7 +122,7 @@ output_data options manifest =
                                     ShowPath   → [toText p]
                                     NoShowPath → []
                                 , case showPriority options of
-                                    ShowPriority   → [toText r]
+                                    ShowPriority   → [maybe "" toText r]
                                     NoShowPriority → []
                                 ]
 

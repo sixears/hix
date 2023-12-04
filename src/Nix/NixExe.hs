@@ -133,12 +133,12 @@ nixBuild ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
                       AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                       AsProcExitError ε, Printable ε, MonadError ε μ,
                       MonadLog (Log MockIOClass) μ) ⇒
-           ConfigDir → NonEmpty AttrPath → μ ()
-nixBuild config_dir attr_paths = do
+           RemoteState → ConfigDir → NonEmpty AttrPath → μ ()
+nixBuild r config_dir attr_paths = do
   msg "building" config_dir attr_paths
   let targets = mkTargets config_dir attr_paths
-  nixDo 𝕹 $ [ "build", "--log-format", "bar-with-logs", "--no-link" ] ⊕
-             (toList targets)
+  nixDo 𝕹 $ ю [ [ "build", "--log-format", "bar-with-logs", "--no-link" ]
+              , remoteArgs r, toList targets ]
 
 ----------------------------------------
 
@@ -146,12 +146,12 @@ nixProfileRemove ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ
                               AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                               AsProcExitError ε, Printable ε, MonadError ε μ,
                               MonadLog (Log MockIOClass) μ) ⇒
-                   ProfileDir → [AttrPath] → μ ()
-nixProfileRemove _ [] = return ()
-nixProfileRemove profile attr_paths = do
+                   RemoteState → ProfileDir → [AttrPath] → μ ()
+nixProfileRemove _ _ [] = return ()
+nixProfileRemove r profile attr_paths = do
   msg "removing" profile attr_paths
-  nixDo 𝕹 $ ["profile", "remove", "--verbose", "--profile", toText profile] ⊕
-             (toText ⊳ attr_paths)
+  nixDo 𝕹 $ ю [ [ "profile", "remove", "--verbose", "--profile", toText profile]
+              , remoteArgs r, toText ⊳ attr_paths ]
 
 ----------------------------------------
 
@@ -160,14 +160,16 @@ nixProfileInstall ∷ ∀ ε δ μ .
                      AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                      AsProcExitError ε, Printable ε, MonadError ε μ,
                      MonadLog (Log MockIOClass) μ) ⇒
-                    ConfigDir → ProfileDir → 𝕄 Priority→NonEmpty AttrPath→μ ()
-nixProfileInstall config_dir profile prio_m attr_paths = do
+                    RemoteState → ConfigDir → ProfileDir
+                  → 𝕄 Priority→NonEmpty AttrPath→μ ()
+nixProfileInstall r config_dir profile prio_m attr_paths = do
   let verb = maybe "" [fmt| «prio %T»|] prio_m
   msg ("installing" ◇ verb) (config_dir, profile) (NonEmpty.sort attr_paths)
   let targets = mkTargets config_dir attr_paths
   let extra_args = maybe [] (\ p → ["--priority", [fmt|%d|] (unPriority p)])
                          prio_m
   nixDo 𝕹 $ ю [ [ "profile", "install", "--profile", toText profile ]
+              , remoteArgs r
               , extra_args, toList targets ]
 
 ----------------------------------------

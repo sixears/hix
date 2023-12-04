@@ -2,7 +2,7 @@
 -- add handling of different architectures
 
 -- add Handle for default profile (~/.nix-profile) (make it a required arg)
--- add nix-install, nix-search equivs
+-- add nix-install, nix-search, nix-repl equivs
 
 {-# LANGUAGE ImportQualifiedPost   #-}
 {-# LANGUAGE LambdaCase            #-}
@@ -213,13 +213,15 @@ collectPackages r cs pkgs =
 
 ----------------------------------------
 
-installFromOneConfig ∷
-  ∀ ε δ μ . (MonadIO μ, AsProcExitError ε, AsCreateProcError ε,
-             AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
-             HasDoMock δ, MonadReader δ μ, MonadLog (Log MockIOClass) μ) ⇒
-            ConfigDir → ProfileDir → 𝕄 Priority → NonEmpty AttrPath → μ ()
+installFromOneConfig ∷ ∀ ε δ μ .
+                       (MonadIO μ, AsProcExitError ε, AsCreateProcError ε,
+                        AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
+                        HasDoMock δ, MonadReader δ μ,
+                        MonadLog (Log MockIOClass) μ) ⇒
+                       RemoteState -> ConfigDir → ProfileDir → 𝕄 Priority
+                     → NonEmpty AttrPath → μ ()
 
-installFromOneConfig config_dir target_profile prio_m attr_paths = do
+installFromOneConfig r config_dir target_profile prio_m attr_paths = do
   profile_manifest ← noMock $
     readManifestDir Notice target_profile ≫ either throwUserError return
 
@@ -244,8 +246,8 @@ installFromOneConfig config_dir target_profile prio_m attr_paths = do
   info $ [fmt|manifest paths: %L|] (attrPaths profile_manifest)
   info $ [fmt|attr_path_prios: %L|] (toList attr_paths)
   let removals = intersect (attrPaths profile_manifest) (toList attr_paths)
-  nixProfileRemove target_profile removals
-  nixProfileInstall config_dir target_profile prio_m attr_paths
+  nixProfileRemove r target_profile removals
+  nixProfileInstall r config_dir target_profile prio_m attr_paths
   return ()
 
 ----------------------------------------
@@ -308,10 +310,10 @@ myMain do_mock opts = flip runReaderT do_mock $
       ModeListPkgs cs     → mainListPkgs r cs
       ModeInstall cs ps   →
         let installFromOneConfigs cd pd =
-              mapM_ (uncurry $ installFromOneConfig cd pd) ∘ Map.toList
+              mapM_ (uncurry $ installFromOneConfig r cd pd) ∘ Map.toList
             concat' ∷ [NonEmpty α] → NonEmpty α
             concat' xs = fromList $ concat (toList ⊳ xs)
-        in  checkPackages (\ cd _ aps → nixBuild cd (concat' $ Map.elems aps))
+        in  checkPackages (\ cd _ aps → nixBuild r cd (concat' $ Map.elems aps))
                           installFromOneConfigs r cs ps
 
 {-| program main entry point -}

@@ -76,7 +76,7 @@ import Nix.Types.StorePath ( spPkgVerPath )
 
 {-| An individual element of a profile manifest -}
 data ManifestElement = ManifestElement { active      :: 𝔹
-                                       , priority    :: Priority
+                                       , priority    :: 𝕄 Priority
                                        , storePaths  :: NonEmpty 𝕋
                                        , attrPath    :: 𝕄 AttrPath
                                        , originalURL :: 𝕄 𝕋
@@ -131,7 +131,7 @@ instance Printable Manifest where
 
 {-| extract the name, version & path from @ManifestElement@ -}
 getNameVerPathPrio ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η) ⇒
-                     ManifestElement → η (Pkg, 𝕄 Ver, AbsDir, Priority)
+                     ManifestElement → η (Pkg, 𝕄 Ver, AbsDir, 𝕄 Priority)
 getNameVerPathPrio e = do
   (pkgs,ver,path) ← spPkgVerPath ⊳ tparse(NonEmpty.head $ storePaths e)
   let prio = priority e

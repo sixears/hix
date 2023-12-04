@@ -1,3 +1,8 @@
+0.1.1.0 2023-12-04
+==================
+- handle manifest.json entries that lack "priority"
+- pass -r/-R to build,install,remove etc. too
+
 0.1.0.1 2023-11-15
 ==================
 - +nyx executable
