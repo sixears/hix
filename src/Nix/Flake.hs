@@ -187,15 +187,14 @@ forMX86_64Pkg_ fps f = forMX86_64Pkg fps f ⪼ return ()
 
 ----------------------------------------
 
-pkgFind ∷ FlakePkgs → Pkg → [(Arch,FlakePkg)]
+pkgFind ∷ FlakePkgs → Pkg → [(Arch,Pkg,FlakePkg)]
 pkgFind fp p =
-  catMaybes [ (a,) ⊳ p `Map.lookup` m | (a,m) ← Map.toList (fp ⊣ packages) ]
+  catMaybes [ (a,p,) ⊳ p `Map.lookup` m | (a,m) ← Map.toList (fp ⊣ packages) ]
 
 ----------------------------------------
 
-pkgName ∷ (Arch,FlakePkg) → (AttrPath, 𝕄 Priority)
-pkgName (arch,fp) = (mkAttrPath (fp ⊣ pkg) ["packages", (toText arch)],
-                     fp⊣priority)
+pkgName ∷ (Arch,Pkg,FlakePkg) → (AttrPath, 𝕄 Priority)
+pkgName (arch,p,fp) = (mkAttrPath p ["packages", (toText arch)], fp ⊣ priority)
 
 ----------------------------------------
 
@@ -203,9 +202,9 @@ pkgFindName_ ∷ ∀ ε η . (MonadError ε η) ⇒
                (Pkg → AbsFile → η (𝕄 (AttrPath,𝕄 Priority))) → FlakePkgs → Pkg
              → η (𝕄 (AttrPath, 𝕄 Priority))
 pkgFindName_ t fp p = case pkgFind fp p of
-                     []    → return 𝕹
-                     [afp] → return $ 𝕵 (pkgName afp)
-                     _     → t p (locFile fp)
+                     []     → return 𝕹
+                     [apfp] → return $ 𝕵 (pkgName apfp)
+                     _      → t p (locFile fp)
 
 --------------------
 
@@ -311,37 +310,12 @@ pkgPrioritiesFromList pkps =
           𝕹 → return $ Map.insert p y pps
           𝕵 y' → fail $ [fmt|duplicate priorities found for %T: (%T,%T)|] p y y'
   in  PkgPriorities ⊳ foldM go Map.empty pkps
-{-
-  let xx ∷ PkgPriority → (Pkg,[Priority])
-      xx = _
-      -- A map from Pkg to all the priorities it's associated with
-      -- (including duplicates)
-      proto_map ∷ Map.Map Pkg [Priority]
-      proto_map = Map.fromListWith _ (xx ⊳ pkps)
-      go pkg [prio] accum =
-        case accum of
-          𝕷 errs → errs
-          𝕽 accum' → case pkg `Map.lookup` accum' of
-                       𝕹   → 𝕽 (_ ∷ Map.Map Pkg Priority)
-                       𝕵 _ → 𝕷 (_ ∷ Map.Map Pkg [Priority])
-      go pkg prios accum =
-        case accum of
-          𝕷 errs → _
-          𝕽 accum' → case pkg `Map.lookup` accum' of
-                       𝕹   → 𝕽 (_ ∷ Map.Map Pkg Priority)
-                       𝕵 _ → 𝕷 (_ ∷ Map.Map Pkg [Priority])
--- XXX could this be foldMapWithKey?
-  in case Map.foldrWithKey go (return $ Map.empty) proto_map of
-    𝕷 e → fail $ _ e
-    𝕽 r → return $ PkgPriorities r
--}
 
 instance Printable PkgPriorities where
   print (PkgPriorities pps) =
     P.text ∘ intercalate "\n" $ toText ∘ PkgPriority ⊳ Map.toList pps
 
 instance TextualPlus PkgPriorities where
-  -- textual' = pkgPrioritiesFromList ⊳ many (textual' ⋪ char '\n')
   textual' = many (textual' ⋪ char '\n') ≫ pkgPrioritiesFromList
 
 readPriorities ∷ ∀ ε γ ω μ .

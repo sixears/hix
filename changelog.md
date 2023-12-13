@@ -1,3 +1,7 @@
+0.1.2.0 2023-12-13
+==================
+- use package name (key from flake output), not name from value map
+
 0.1.1.0 2023-12-04
 ==================
 - handle manifest.json entries that lack "priority"

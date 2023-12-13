@@ -136,33 +136,6 @@ partitionMaybes = go ([],[])
 
 ----------------------------------------
 
-checkPackages ∷ ∀ ε α μ .
-                (MonadIO μ, MonadLog (Log MockIOClass) μ,
-                 AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
-                 AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
-                 AsTextualParseError ε, Printable ε, MonadError ε μ) ⇒
-                (ConfigDir → ProfileDir
-                           → Map.Map (𝕄 Priority) (NonEmpty AttrPath) → μ ())
-              → (ConfigDir → ProfileDir
-                           → Map.Map (𝕄 Priority) (NonEmpty AttrPath) → μ α)
-              → RemoteState → [ConfigName] → Packages → μ Word8
-checkPackages check go r [] pkgs = checkPackages check go r [configDefault] pkgs
-checkPackages check go r cs pkgs = do
-  -- targets ∷ [(ConfigDir,ProfileDir,NonEmpty AttrPath)]
-  targets ← collectPackages r cs pkgs
-  -- we split into 'check' and 'go' so that we can do pre-emptively make all the
-  -- necessary checks before making any destructive changes
-  forM_ targets (\ (cd,pd,aps) → check cd pd aps)
-  forM_ targets (\ (cd,pd,aps) → go cd pd aps)
-  return 0
-
-----------------------------------------
-
-multiMap ∷ (Foldable ψ, Ord κ) ⇒ ψ (κ,ν) → Map.Map κ (NonEmpty ν)
-multiMap = Map.fromListWith (◇) ∘ fmap (second pure) ∘ toList
-
-----------------------------------------
-
 {-| Find what packages to install.
 
     Given some config names (desktop, haskell, scripts, etc.) and some package
@@ -204,12 +177,38 @@ collectPackages r cs pkgs =
         throwUsageT $ [fmt|packages not found in %T: %L|] c missing
       ([],pkgs'' ∷ [(Pkg,(AttrPath, (𝕄 Priority)))]) →
         case nonEmpty (snd ⊳ pkgs'') of
-          𝕵 attr_path_prios → do return (config_dir, target_profile,
-                                         multiMap $ swap ⊳ attr_path_prios)
+          𝕵 pkg_attr_path_prios → return (config_dir, target_profile,
+                                          multiMap $ swap ⊳ pkg_attr_path_prios)
           𝕹 →
             throwUsageT $ intercalate " " [ "internal error: nonEmpty pkgs'"
                                           , "means this should never happen"])
 
+----------------------------------------
+
+checkPackages ∷ ∀ ε μ .
+                (MonadIO μ, MonadLog (Log MockIOClass) μ,
+                 AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
+                 AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
+                 AsTextualParseError ε, Printable ε, MonadError ε μ) ⇒
+                (ConfigDir → ProfileDir
+                           → Map.Map (𝕄 Priority) (NonEmpty AttrPath) → μ ())
+              → (ConfigDir → ProfileDir
+                           → Map.Map (𝕄 Priority) (NonEmpty AttrPath) → μ ())
+              → RemoteState → [ConfigName] → Packages → μ Word8
+checkPackages check go r [] pkgs = checkPackages check go r [configDefault] pkgs
+checkPackages check go r cs pkgs = do
+  -- targets ∷ [(ConfigDir,ProfileDir,NonEmpty AttrPath)]
+  targets ← collectPackages r cs pkgs
+  -- we split into 'check' and 'go' so that we can do pre-emptively make all the
+  -- necessary checks before making any destructive changes
+  forM_ targets (\ (cd,pd,aps) → check cd pd aps)
+  forM_ targets (\ (cd,pd,aps) → go cd pd aps)
+  return 0
+
+----------------------------------------
+
+multiMap ∷ (Foldable ψ, Ord κ) ⇒ ψ (κ,ν) → Map.Map κ (NonEmpty ν)
+multiMap = Map.fromListWith (◇) ∘ fmap (second pure) ∘ toList
 
 ----------------------------------------
 

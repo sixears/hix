@@ -100,6 +100,9 @@ apPkg ap = (_pkg ⊳ tparse ap)
 
 ----------------------------------------
 
+{-| Create an `AttrPath` from a `Pkg` and a list of prefix strings
+  mkAttrPath (Pkg "emacs") ["packages","x86_64-linux"] -> "packages.x86_64-linux.emacs"
+-}
 mkAttrPath ∷ Pkg → [𝕋] → AttrPath
 mkAttrPath p ts = AttrPath ts p
 

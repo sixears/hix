@@ -3,4 +3,4 @@ module Nix.Paths where
 import FPath.AbsFile  ( AbsFile, absfile )
 
 nix :: AbsFile
-nix = [absfile|/nix/store/pfaw5zpqfang1w1ms61lw8q60sg7fzxy-nix-2.12.0/bin/nix|]
+nix = [absfile|/nix/store/448gm18klczl8fmkv346a3dkwig3k90j-nix-2.13.6/bin/nix|]

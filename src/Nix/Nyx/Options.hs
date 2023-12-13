@@ -48,6 +48,7 @@ import Nix.Types.ConfigName ( ConfigName )
 
 data Packages = AllPackages
               | SomePackages (NonEmpty Pkg)
+  deriving Show
 
 ------------------------------------------------------------
 

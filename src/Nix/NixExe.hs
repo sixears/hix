@@ -88,8 +88,8 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 import Nix.Paths          qualified as Paths
 import Nix.Types.AttrPath qualified as AttrPath
 
-import Nix.Types             ( Priority(unPriority), ProfileDir, RemoteState,
-                               remoteArgs )
+import Nix.Types             ( Priority(unPriority), ProfileDir,
+                               RemoteState, remoteArgs )
 import Nix.Types.AttrPath    ( AttrPath )
 import Nix.Types.ConfigDir   ( ConfigDir(unConfigDir) )
 import Nix.Types.FlakePkgs   ( FlakePkgs(FlakePkgs), flakeShowTestInput )
