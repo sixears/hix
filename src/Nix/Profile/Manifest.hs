@@ -139,7 +139,8 @@ elementsi m = zip [0..] (elements m)
 findPkgs ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η)⇒
            Pkg → Manifest → η [ℕ]
 findPkgs p m = do
-  pkgs ← sequence [ view _1 ⊳ getNameVerPathPrio e | e ← elements m ]
+  pkgs ← view _1 ⊳⊳
+              (catMaybes ⊳ sequence [ (getNameVerPathPrio e) | e ← elements m ])
   return $ fromIntegral ⊳ elemIndices p pkgs
 
 findPkg_ ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η)⇒

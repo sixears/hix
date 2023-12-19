@@ -20,8 +20,6 @@ import Data.Aeson ( FromJSON(parseJSON), eitherDecodeStrict', withObject, (.:) )
 
 -- base --------------------------------
 
-import Data.List.NonEmpty qualified as NonEmpty
-
 import GHC.Generics ( Generic )
 
 -- fpath -------------------------------
@@ -54,6 +52,10 @@ import MockIO.OpenFile ( readFile )
 
 import Control.Monad.Reader ( MonadReader, ask )
 
+-- text --------------------------------
+
+import Data.Text  ( pack )
+
 -- text-printer ------------------------
 
 import Text.Printer qualified as P
@@ -77,7 +79,7 @@ import Nix.Types.StorePath ( spPkgVerPath )
 {-| An individual element of a profile manifest -}
 data ManifestElement = ManifestElement { active      :: 𝔹
                                        , priority    :: 𝕄 Priority
-                                       , storePaths  :: NonEmpty 𝕋
+                                       , storePaths  :: [𝕋]
                                        , attrPath    :: 𝕄 AttrPath
                                        , originalURL :: 𝕄 𝕋
                                        , url         :: 𝕄 𝕋
@@ -122,8 +124,9 @@ readManifestFile sev f = do
 instance Printable Manifest where
   print m =
     let getName e = case getNameVerPathPrio @TextualParseError e of
-                      𝕷 err       → toText err
-                      𝕽 (p,_,_,_) → toText p
+                      𝕷 err           → toText err
+                      𝕽 𝕹             → pack $ show e
+                      𝕽 (𝕵 (p,_,_,_)) → toText p
 
     in  P.text $ [fmt|manifest: %L|] [ getName e | e ← elements m ]
 
@@ -131,12 +134,15 @@ instance Printable Manifest where
 
 {-| extract the name, version & path from @ManifestElement@ -}
 getNameVerPathPrio ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η) ⇒
-                     ManifestElement → η (Pkg, 𝕄 Ver, AbsDir, 𝕄 Priority)
-getNameVerPathPrio e = do
-  (pkgs,ver,path) ← spPkgVerPath ⊳ tparse(NonEmpty.head $ storePaths e)
-  let prio = priority e
-  case attrPath e of
-    𝕵 ap → (,ver,path,prio) ⊳ apPkg (toText ap)
-    𝕹    → return (pkgs,ver,path,prio)
+                     ManifestElement → η (𝕄 (Pkg, 𝕄 Ver, AbsDir, 𝕄 Priority))
+getNameVerPathPrio e =
+  case head $ storePaths e of
+    𝕹 → return 𝕹
+    𝕵 p → 𝕵 ⊳ do
+      (pkgs,ver,path) ← spPkgVerPath ⊳ tparse p
+      let prio = priority e
+      case attrPath e of
+        𝕵 ap → (,ver,path,prio) ⊳ apPkg (toText ap)
+        𝕹    → return (pkgs,ver,path,prio)
 
 -- that's all, folks! ----------------------------------------------------------

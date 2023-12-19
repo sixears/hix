@@ -1,3 +1,7 @@
+0.1.3.0 2023-12-19
+==================
+- handle manifests with empty store paths
+
 0.1.2.0 2023-12-13
 ==================
 - use package name (key from flake output), not name from value map

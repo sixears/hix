@@ -128,8 +128,9 @@ output_data options manifest =
 
       print_name_ver (i,e) = do
         case getNameVerPathPrio @TextualParseError e of
-          𝕷 err       → pShow err
-          𝕽 (n,v,p,r) → putStrLn (intercalate "\t" $ get_columns i n v p r)
+          𝕷 err           → pShow err
+          𝕽 𝕹             → return ()
+          𝕽 (𝕵 (n,v,p,r)) → putStrLn (intercalate "\t" $ get_columns i n v p r)
 
   in forM_ (elementsi manifest) print_name_ver
 

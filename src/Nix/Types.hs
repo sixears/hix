@@ -99,8 +99,9 @@ instance TextualPlus Pkg where
         non_hyphen             = satisfy (\ c → isAlphaNum c ∨ c ∈ "_.")
         simple_identifier      ∷ CharParsing η ⇒ η 𝕊
         simple_identifier      = (:) ⊳ alpha_under_score ⊵ many non_hyphen
-    in  (Pkg ∘ pack) ⊳ intercalate "-" ⊳ ((:) ⊳ simple_identifier
-                                       ⊵ many(try $char '-' ⋫simple_identifier))
+    in  (Pkg ∘ pack) ⊳ intercalate "-"
+                     ⊳ ((:) ⊳ simple_identifier
+                            ⊵ many(try $ char '-' ⋫simple_identifier))
 
 
 ------------------------------------------------------------
