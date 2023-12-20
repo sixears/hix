@@ -106,8 +106,8 @@ instance TextualPlus Pkg where
 
 ------------------------------------------------------------
 
-{-| a nix profile manifest priority -}
-newtype Priority = Priority { unPriority :: ℕ }
+{-| a nix profile manifest priority.  Yes, this can sometimes be negative! -}
+newtype Priority = Priority { unPriority :: ℤ }
   deriving newtype (Eq, FromJSON, NFData, Ord, Show)
 
 instance Printable Priority where

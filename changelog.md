@@ -1,3 +1,7 @@
+0.1.4.0 2023-12-20
+==================
+- handle -ve priority in manifests
+
 0.1.3.0 2023-12-19
 ==================
 - handle manifests with empty store paths
