@@ -87,7 +87,7 @@ import Control.Monad.Reader ( MonadReader, runReaderT )
 
 -- optparse-applicative ----------------
 
-import Options.Applicative.Help.Pretty ( empty, vcat )
+import Options.Applicative.Help.Pretty ( Doc, emptyDoc, vcat )
 
 -- stdmain -----------------------------
 
@@ -217,7 +217,7 @@ installFromOneConfig ∷ ∀ ε δ μ .
                         AsIOError ε, AsFPathError ε, Printable ε, MonadError ε μ,
                         HasDoMock δ, MonadReader δ μ,
                         MonadLog (Log MockIOClass) μ) ⇒
-                       RemoteState -> ConfigDir → ProfileDir → 𝕄 Priority
+                       RemoteState → ConfigDir → ProfileDir → 𝕄 Priority
                      → NonEmpty AttrPath → μ ()
 
 installFromOneConfig r config_dir target_profile prio_m attr_paths = do
@@ -318,7 +318,7 @@ myMain do_mock opts = flip runReaderT do_mock $
 {-| program main entry point -}
 main ∷ MonadIO μ ⇒ μ ()
 main = do
-  let desc = vcat $ [ "manage nix configs for ~home installation", empty ]
+  let desc = vcat [ "manage nix configs for ~home installation"∷ Doc, emptyDoc ]
   getArgs ≫ stdMain desc parseOptions (myMain @NixProgramError)
 
 -- that's all, folks! ----------------------------------------------------------

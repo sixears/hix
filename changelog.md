@@ -1,3 +1,7 @@
+0.1.4.1 2024-06-24
+==================
+- optparse-applicative > 0.18.0.0
+
 0.1.4.0 2023-12-20
 ==================
 - handle -ve priority in manifests
