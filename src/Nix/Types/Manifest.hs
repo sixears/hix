@@ -18,15 +18,13 @@ import Base1T
 
 import Data.Aeson.KeyMap qualified as KeyMap
 
-import Data.Aeson        ( FromJSON(parseJSON), Key, Result(Success),
-                           Value(Array, Object), eitherDecodeStrict', fromJSON,
-                           (.:) )
-import Data.Aeson.KeyMap ( toMap, toMapText )
-import Data.Aeson.Types  ( Parser, parseJSON, toJSON, withObject, withText )
+import Data.Aeson       ( FromJSON(parseJSON), Value(Array, Object),
+                          eitherDecodeStrict', (.:) )
+import Data.Aeson.Types ( Parser, toJSON, typeMismatch, withObject, withText )
 
 -- base --------------------------------
 
-import Data.Maybe   ( catMaybes, fromMaybe )
+import Data.Maybe   ( catMaybes )
 import GHC.Generics ( Generic )
 
 -- containers --------------------------
@@ -119,9 +117,6 @@ manifestContents v es = ManifestContents { version = v, elementMap = es }
 
 ----------------------------------------
 
-rr ∷ Result α → α
-rr (Success a) = a
-
 readElements ∷ Value → Parser ManifestElementMap
 readElements (Object o) =
   let parseKV (k,v) = do
@@ -134,6 +129,8 @@ readElements (Array as) =
   let f e = (,e) ∘ unPkg ∘ view pkg ⊳ e ⊣ attrPath
   in    ManifestElementMap ∘ Map.fromList ⩺ fmap catMaybes ∘ sequence
       ∘ fmap (fmap f) ∘ fmap parseJSON $ toList as
+
+readElements v = typeMismatch "ManifestElementMap" v
 
 instance FromJSON ManifestContents where
   parseJSON = withObject "ManifestContents" $ \ v →
