@@ -76,7 +76,7 @@ instance Ord AttrPath where
 instance TextualPlus AttrPath where
   textual' =
     let mkAttrPath_ ∷ NonEmpty 𝕊 → AttrPath
-        mkAttrPath_ (x :| xs) = (AttrPath (pack ⊳ reverse xs) (fromString x))
+        mkAttrPath_ (x :| xs) = AttrPath (pack ⊳ reverse xs) (fromString x)
         mkAttrPath' ∷ NonEmpty 𝕊 → AttrPath
         mkAttrPath' = mkAttrPath_ ∘ NonEmpty.reverse
     in  mkAttrPath' ⊳ sepByNonEmpty (some (noneOf ".")) (char '.')

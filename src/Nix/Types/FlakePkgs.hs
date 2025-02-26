@@ -96,15 +96,9 @@ newtype FlakePkgs' = FlakePkgs' { unFlakePkgs' :: Map Arch (Map Pkg FlakePkg) }
   deriving (Eq, Generic, Show)
 
 instance FromJSON FlakePkgs' where
-  parseJSON =
-    withObject "FlakePkgs'" $ \ v →
-    {- let customOptions ∷ AesonTypes.Options
-        customOptions =
-          let dropLeadingUnderscore ('_' : s) = s
-              dropLeadingUnderscore s         = s
-          in  defaultOptions { fieldLabelModifier = dropLeadingUnderscore }
-    in -} FlakePkgs' ⊳ v .: "packages"
+  parseJSON = withObject "FlakePkgs'" $ \ v → FlakePkgs' ⊳ v .: "packages"
 
+------------------------------------------------------------
 
 class HasArchFlakePkgMap α where
   archMap ∷ Lens' α (Map Arch (Map Pkg FlakePkg))

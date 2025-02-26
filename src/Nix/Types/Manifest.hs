@@ -3,12 +3,12 @@
 
 module Nix.Types.Manifest
   ( Manifest
-  , ManifestElement
   , attrPath
   , elements
   , getNameVerPathPrio
   , location
   , readManifestFile
+  , tests
   , version
   ) where
 
@@ -16,16 +16,31 @@ import Base1T
 
 -- aeson -------------------------------
 
-import Data.Aeson ( FromJSON(parseJSON), eitherDecodeStrict', withObject, (.:) )
+import Data.Aeson.KeyMap qualified as KeyMap
+
+import Data.Aeson        ( FromJSON(parseJSON), Key, Result(Success),
+                           Value(Array, Object), eitherDecodeStrict', fromJSON,
+                           (.:) )
+import Data.Aeson.KeyMap ( toMap, toMapText )
+import Data.Aeson.Types  ( Parser, parseJSON, toJSON, withObject, withText )
 
 -- base --------------------------------
 
+import Data.Maybe   ( catMaybes, fromMaybe )
 import GHC.Generics ( Generic )
+
+-- containers --------------------------
+
+import Data.Map.Lazy qualified as Map
 
 -- fpath -------------------------------
 
 import FPath.AbsDir  ( AbsDir )
 import FPath.AbsFile ( AbsFile )
+
+-- lens --------------------------------
+
+import Control.Lens.Getter ( view )
 
 -- log-plus ----------------------------
 
@@ -54,7 +69,7 @@ import Control.Monad.Reader ( MonadReader, ask )
 
 -- text --------------------------------
 
-import Data.Text  ( pack )
+import Data.Text ( pack )
 
 -- text-printer ------------------------
 
@@ -70,45 +85,79 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError,
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Types           ( Pkg, Priority, Ver )
-import Nix.Types.AttrPath  ( AttrPath, apPkg )
-import Nix.Types.StorePath ( spPkgVerPath )
+import Nix.T.Helpers             ( checkFromJSON )
+import Nix.Types                 ( Pkg(unPkg), Priority, Ver )
+import Nix.Types.AttrPath        ( apPkg, pkg )
+import Nix.Types.ManifestElement ( ManifestElement, attrPath, priority,
+                                   storePaths )
+import Nix.Types.StorePath       ( spPkgVerPath )
+
+import Nix.Types.ManifestElement     qualified as ManifestElement
+import Nix.Types.T.TestData.Manifest qualified as TestData
 
 --------------------------------------------------------------------------------
 
-{-| An individual element of a profile manifest -}
-data ManifestElement = ManifestElement { active      :: 𝔹
-                                       , priority    :: 𝕄 Priority
-                                       , storePaths  :: [𝕋]
-                                       , attrPath    :: 𝕄 AttrPath
-                                       , originalURL :: 𝕄 𝕋
-                                       , url         :: 𝕄 𝕋
-                                       }
-  deriving (Generic, Show)
+newtype ManifestElementMap = ManifestElementMap { unManifestElementMap :: (Map.Map 𝕋 ManifestElement) }
+  deriving (Eq, Generic, Show)
 
-instance FromJSON ManifestElement
+instance FromJSON ManifestElementMap
+
+------------------------------------------------------------
+
+-- newtype ManifestContents = ManifestContents (ℤ, [ManifestElement])
+data ManifestContents = ManifestContents { version    :: ℤ
+                                         , elementMap :: ManifestElementMap
+                                         }
+  deriving (Eq, Show)
+
+--------------------
+
+-- manifestContents ∷ ℤ → [ManifestElement] → ManifestContents
+-- manifestContents v es = ManifestContents (v,es)
+manifestContents ∷ ℤ → ManifestElementMap → ManifestContents
+manifestContents v es = ManifestContents { version = v, elementMap = es }
+
+----------------------------------------
+
+rr ∷ Result α → α
+rr (Success a) = a
+
+readElements ∷ Value → Parser ManifestElementMap
+readElements (Object o) =
+  let parseKV (k,v) = do
+        ḳ ← withText "elementKey" return (toJSON k)
+        ṿ ← withObject "ManifestElement" (parseJSON ∘ toJSON) v
+        return (ḳ,ṿ)
+  in  ManifestElementMap ∘ Map.fromList ⩺ sequence $ parseKV ⊳ KeyMap.toList o
+
+readElements (Array as) =
+  let f e = (,e) ∘ unPkg ∘ view pkg ⊳ e ⊣ attrPath
+  in    ManifestElementMap ∘ Map.fromList ⩺ fmap catMaybes ∘ sequence
+      ∘ fmap (fmap f) ∘ fmap parseJSON $ toList as
+
+instance FromJSON ManifestContents where
+  parseJSON = withObject "ManifestContents" $ \ v →
+    manifestContents ⊳ v .: "version" ⊵ (v .: "elements" ≫ readElements)
 
 ------------------------------------------------------------
 
 {-| A profile manifest, read from a `manifest.json` file -}
-data Manifest = Manifest { version  :: ℤ
-                         , location :: AbsFile
-                         , elements :: [ManifestElement]
+data Manifest = Manifest { location :: AbsFile
+                         , contents :: ManifestContents
                          }
-  deriving (Generic, Show)
+  deriving (Eq, Generic, Show)
 
-newtype ManifestContents = ManifestContents (ℤ, [ManifestElement])
+----------------------------------------
 
-manifestContents ∷ ℤ → [ManifestElement] → ManifestContents
-manifestContents v es = ManifestContents (v,es)
+elements ∷ Manifest → [ManifestElement]
+elements = Map.elems ∘ unManifestElementMap ∘ elementMap ∘ contents
+
+----------------------------------------
 
 mkManifest ∷ AbsFile → ManifestContents → Manifest
-mkManifest f (ManifestContents (v,es)) =
-  Manifest { version = v, location = f, elements = es }
+mkManifest f cs =  Manifest { location = f, contents = cs }
 
-instance FromJSON ManifestContents where
-  parseJSON = withObject "Manifest" $ \ v →
-    manifestContents ⊳ v .: "version" ⊵ v .: "elements"
+----------------------------------------
 
 readManifestFile ∷ ∀ ε ω μ .
                    (MonadIO μ, MonadReader DoMock μ,
@@ -117,7 +166,7 @@ readManifestFile ∷ ∀ ε ω μ .
                    Severity → AbsFile → μ (𝔼 𝕊 Manifest)
 readManifestFile sev f = do
   bs ← ask ≫ readFile sev 𝕹 (return "") f
-  liftIO $ mkManifest f ⊳⊳ return (eitherDecodeStrict' bs)
+  return $ mkManifest f ⊳ eitherDecodeStrict' bs
 
 --------------------
 
@@ -136,13 +185,42 @@ instance Printable Manifest where
 getNameVerPathPrio ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η) ⇒
                      ManifestElement → η (𝕄 (Pkg, 𝕄 Ver, AbsDir, 𝕄 Priority))
 getNameVerPathPrio e =
-  case head $ storePaths e of
+  case head $ e ⊣ storePaths of
     𝕹 → return 𝕹
     𝕵 p → 𝕵 ⊳ do
       (pkgs,ver,path) ← spPkgVerPath ⊳ tparse p
-      let prio = priority e
-      case attrPath e of
+      let prio = e ⊣ priority
+      case e ⊣ attrPath of
         𝕵 ap → (,ver,path,prio) ⊳ apPkg (toText ap)
         𝕹    → return (pkgs,ver,path,prio)
+
+
+-- tests -----------------------------------------------------------------------
+
+{-| unit tests -}
+tests ∷ TestTree
+tests =
+  testGroup "Manifest"
+    [ testGroup "fromJSON"
+      [ checkFromJSON "v2Manifest" TestData.v2Manifest
+          (let elems = [ ("chrysalis", ManifestElement.manifestElement1)
+                       , ("gqview"   , ManifestElement.manifestElement2) ]
+           in  ManifestContents { version = 2
+                                , elementMap = ManifestElementMap $ Map.fromList elems })
+      , checkFromJSON "v3Manifest" TestData.v3Manifest
+          (let elems = [ ("chrysalis", ManifestElement.manifestElement1)
+                       , ("gqview"   , ManifestElement.manifestElement2) ]
+           in  ManifestContents { version = 3, elementMap = ManifestElementMap $ Map.fromList elems })
+      ]
+    ]
+
+_test ∷ IO ExitCode
+_test = runTestTree tests
+
+_tests ∷ 𝕊 → IO ExitCode
+_tests = runTestsP tests
+
+_testr ∷ 𝕊 → ℕ → IO ExitCode
+_testr = runTestsReplay tests
 
 -- that's all, folks! ----------------------------------------------------------

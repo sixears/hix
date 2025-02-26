@@ -80,20 +80,24 @@ library
                   , Nix.Profile
                   , Nix.Profile.Manifest
                   , Nix.Paths
+                  , Nix.T.Helpers
                   , Nix.Types
                   , Nix.Types.AttrPath
                   , Nix.Types.ConfigName
                   , Nix.Types.ConfigDir
                   , Nix.Types.FlakePkgs
                   , Nix.Types.Manifest
+                  , Nix.Types.ManifestElement
                   , Nix.Types.StorePath
                   , Nix.Types.ToBriefText
+                  , Nix.Types.T.TestData.Manifest
+                  , Nix.Types.T.TestData.ManifestElement
 
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
 
   -- Other library packages from which modules are imported.
-  build-depends: aeson, base, containers, data-textual, deepseq
+  build-depends: aeson, base, bytestring, containers, data-textual, deepseq
                , lens, logging-effect, mono-traversable, mtl
                , optparse-applicative, parsers, safe, text, text-printer
 
