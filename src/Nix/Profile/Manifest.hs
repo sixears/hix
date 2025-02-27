@@ -74,14 +74,16 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Error          ( AsNixDuplicatePkgError, AsNixError,
-                            throwAsNixDuplicatePkgError,
-                            throwAsNixErrorDuplicatePkg )
-import Nix.Profile        ( nixProfileAbsDir )
-import Nix.Types          ( Pkg, ProfileDir(unProfileDir) )
-import Nix.Types.AttrPath ( AttrPath )
-import Nix.Types.Manifest ( Manifest, ManifestElement, attrPath, elements,
-                            getNameVerPathPrio, location, readManifestFile )
+import Nix.Error                 ( AsNixDuplicatePkgError, AsNixError,
+                                   throwAsNixDuplicatePkgError,
+                                   throwAsNixErrorDuplicatePkg )
+import Nix.Profile               ( nixProfileAbsDir )
+import Nix.Types                 ( Pkg, ProfileDir(unProfileDir) )
+import Nix.Types.AttrPath        ( AttrPath )
+import Nix.Types.Manifest        ( Manifest, attrPath, elements,
+                                   getNameVerPathPrio, location,
+                                   readManifestFile )
+import Nix.Types.ManifestElement ( ManifestElement )
 
 --------------------------------------------------------------------------------
 
@@ -162,6 +164,6 @@ findPkg' = findPkg_ throwAsNixErrorDuplicatePkg
 ----------------------------------------
 
 attrPaths ∷ Manifest → [AttrPath]
-attrPaths m = catMaybes [ attrPath e | e ← elements m ]
+attrPaths m = catMaybes [ e ⊣ attrPath | e ← elements m ]
 
 -- that's all, folks! ----------------------------------------------------------
