@@ -119,12 +119,13 @@ import Nix.Nyx.Options      ( Configs(AllConfigs, SomeConfigs),
                               Options, Packages(AllPackages, SomePackages),
                               mode, parseOptions, remote_state )
 import Nix.Profile          ( nixProfileAbsDir )
-import Nix.Profile.Manifest ( attrPaths, readManifestDir )
+import Nix.Profile.Manifest ( readManifestDir )
 import Nix.Types            ( Pkg, Priority, ProfileDir, RemoteState )
 import Nix.Types.AttrPath   ( AttrPath )
 import Nix.Types.ConfigDir  ( ConfigDir, allConfigDirs, allConfigNames,
                               configDirFromAbs )
 import Nix.Types.ConfigName ( ConfigName(unConfigName), configDefault )
+import Nix.Types.Manifest   ( names )
 
 --------------------------------------------------------------------------------
 
@@ -154,7 +155,7 @@ collectPackages ∷ ∀ ε ψ μ .
                    AsTextualParseError ε, Printable ε, MonadError ε μ) ⇒
                   RemoteState → ψ ConfigName → Packages
                 → μ (ψ (ConfigDir, ProfileDir,
-                        Map.Map (𝕄 Priority) (NonEmpty AttrPath)))
+                        Map.Map (𝕄 Priority) (NonEmpty Pkg)))
 
 collectPackages r cs pkgs =
   forM cs (\ c → do
@@ -176,24 +177,25 @@ collectPackages r cs pkgs =
       (missing@(_:_:_),_) →
         throwUsageT $ [fmt|packages not found in %T: %L|] c missing
       ([],pkgs'' ∷ [(Pkg,(AttrPath, (𝕄 Priority)))]) →
-        case nonEmpty (snd ⊳ pkgs'') of
+        case nonEmpty (first snd ∘ swap ⊳ pkgs'') of
           𝕵 pkg_attr_path_prios → return (config_dir, target_profile,
-                                          multiMap $ swap ⊳ pkg_attr_path_prios)
+                                          multiMap $ pkg_attr_path_prios)
           𝕹 →
             throwUsageT $ intercalate " " [ "internal error: nonEmpty pkgs'"
                                           , "means this should never happen"])
 
 ----------------------------------------
 
+{- | for all pkg in `pkgs`; first run `check`, then run `go` -}
 checkPackages ∷ ∀ ε μ .
                 (MonadIO μ, MonadLog (Log MockIOClass) μ,
                  AsUsageError ε, AsIOError ε, AsFPathError ε, AsAesonError ε,
                  AsCreateProcError ε, AsProcExitError ε, AsNixError ε,
                  AsTextualParseError ε, Printable ε, MonadError ε μ) ⇒
                 (ConfigDir → ProfileDir
-                           → Map.Map (𝕄 Priority) (NonEmpty AttrPath) → μ ())
+                           → Map.Map (𝕄 Priority) (NonEmpty Pkg) → μ ())
               → (ConfigDir → ProfileDir
-                           → Map.Map (𝕄 Priority) (NonEmpty AttrPath) → μ ())
+                           → Map.Map (𝕄 Priority) (NonEmpty Pkg) → μ ())
               → RemoteState → [ConfigName] → Packages → μ Word8
 checkPackages check go r [] pkgs = checkPackages check go r [configDefault] pkgs
 checkPackages check go r cs pkgs = do
@@ -218,9 +220,9 @@ installFromOneConfig ∷ ∀ ε δ μ .
                         HasDoMock δ, MonadReader δ μ,
                         MonadLog (Log MockIOClass) μ) ⇒
                        RemoteState → ConfigDir → ProfileDir → 𝕄 Priority
-                     → NonEmpty AttrPath → μ ()
+                     → NonEmpty Pkg → μ ()
 
-installFromOneConfig r config_dir target_profile prio_m attr_paths = do
+installFromOneConfig r config_dir target_profile prio_m pkgs = do
   profile_manifest ← noMock $
     readManifestDir Notice target_profile ≫ either throwUserError return
 
@@ -242,11 +244,11 @@ installFromOneConfig r config_dir target_profile prio_m attr_paths = do
   -- nix profile install adds a new package without removing the older one
 
   debug $ [fmt|manifest: %T|] profile_manifest
-  info $ [fmt|manifest paths: %L|] (attrPaths profile_manifest)
-  info $ [fmt|attr_path_prios: %L|] (toList attr_paths)
-  let removals = intersect (attrPaths profile_manifest) (toList attr_paths)
+  info $ [fmt|manifest names: %L|] (names profile_manifest)
+  info $ [fmt|attr_path_prios: %L|] (toList pkgs)
+  let removals = intersect (names profile_manifest) (toList pkgs)
   nixProfileRemove r target_profile removals
-  nixProfileInstall r config_dir target_profile prio_m attr_paths
+  nixProfileInstall r config_dir target_profile prio_m pkgs
   return ()
 
 ----------------------------------------

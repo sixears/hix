@@ -79,8 +79,7 @@ import Nix.Error                 ( AsNixDuplicatePkgError, AsNixError,
                                    throwAsNixErrorDuplicatePkg )
 import Nix.Profile               ( nixProfileAbsDir )
 import Nix.Types                 ( Pkg, ProfileDir(unProfileDir) )
-import Nix.Types.AttrPath        ( AttrPath )
-import Nix.Types.Manifest        ( Manifest, attrPath, elements,
+import Nix.Types.Manifest        ( Manifest, attrPaths, elements,
                                    getNameVerPathPrio, location,
                                    readManifestFile )
 import Nix.Types.ManifestElement ( ManifestElement )
@@ -160,10 +159,5 @@ findPkg = findPkg_ throwAsNixDuplicatePkgError
 findPkg' ∷ (AsNixError ε, AsTextualParseError ε, MonadError ε η) ⇒
            Pkg → Manifest → η (𝕄 ℕ)
 findPkg' = findPkg_ throwAsNixErrorDuplicatePkg
-
-----------------------------------------
-
-attrPaths ∷ Manifest → [AttrPath]
-attrPaths m = catMaybes [ e ⊣ attrPath | e ← elements m ]
 
 -- that's all, folks! ----------------------------------------------------------

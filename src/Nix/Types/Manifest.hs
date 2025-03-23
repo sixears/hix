@@ -4,9 +4,11 @@
 module Nix.Types.Manifest
   ( Manifest
   , attrPath
+  , attrPaths
   , elements
   , getNameVerPathPrio
   , location
+  , names
   , readManifestFile
   , tests
   , version
@@ -24,12 +26,19 @@ import Data.Aeson.Types ( Parser, toJSON, typeMismatch, withObject, withText )
 
 -- base --------------------------------
 
-import Data.Maybe   ( catMaybes )
-import GHC.Generics ( Generic )
+import Data.String qualified as S
+
+import Control.Monad.Fail ( fail )
+import Data.Maybe         ( catMaybes )
+import GHC.Generics       ( Generic )
 
 -- containers --------------------------
 
 import Data.Map.Lazy qualified as Map
+
+-- data-textual ------------------------
+
+import Data.Textual ( Parsed(Malformed, Parsed) )
 
 -- fpath -------------------------------
 
@@ -67,7 +76,7 @@ import Control.Monad.Reader ( MonadReader, ask )
 
 -- text --------------------------------
 
-import Data.Text ( pack )
+import Data.Text qualified as T
 
 -- text-printer ------------------------
 
@@ -75,7 +84,7 @@ import Text.Printer qualified as P
 
 -- textual-plus ------------------------
 
-import TextualPlus                         ( tparse )
+import TextualPlus                         ( parseText, tparse )
 import TextualPlus.Error.TextualParseError ( AsTextualParseError,
                                              TextualParseError )
 
@@ -84,8 +93,8 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError,
 ------------------------------------------------------------
 
 import Nix.T.Helpers             ( checkFromJSON )
-import Nix.Types                 ( Pkg(unPkg), Priority, Ver )
-import Nix.Types.AttrPath        ( apPkg, pkg )
+import Nix.Types                 ( Pkg, Priority, Ver )
+import Nix.Types.AttrPath        ( AttrPath, apPkg, pkg )
 import Nix.Types.ManifestElement ( ManifestElement, attrPath, priority,
                                    storePaths )
 import Nix.Types.StorePath       ( spPkgVerPath )
@@ -95,7 +104,7 @@ import Nix.Types.T.TestData.Manifest qualified as TestData
 
 --------------------------------------------------------------------------------
 
-newtype ManifestElementMap = ManifestElementMap { unManifestElementMap :: (Map.Map 𝕋 ManifestElement) }
+newtype ManifestElementMap = ManifestElementMap { unManifestElementMap :: (Map.Map Pkg ManifestElement) }
   deriving (Eq, Generic, Show)
 
 instance FromJSON ManifestElementMap
@@ -119,14 +128,18 @@ manifestContents v es = ManifestContents { version = v, elementMap = es }
 
 readElements ∷ Value → Parser ManifestElementMap
 readElements (Object o) =
-  let parseKV (k,v) = do
+  let parseKV ∷ (KeyMap.Key,Value) → Parser (Pkg,ManifestElement)
+      parseKV (k,v) = do
         ḳ ← withText "elementKey" return (toJSON k)
         ṿ ← withObject "ManifestElement" (parseJSON ∘ toJSON) v
-        return (ḳ,ṿ)
+        case parseText ḳ of
+          Parsed ḵ       → return (ḵ,ṿ)
+          Malformed es e → fail (S.unlines $ e:es)
+        -- return (parseText ḳ,ṿ)
   in  ManifestElementMap ∘ Map.fromList ⩺ sequence $ parseKV ⊳ KeyMap.toList o
 
 readElements (Array as) =
-  let f e = (,e) ∘ unPkg ∘ view pkg ⊳ e ⊣ attrPath
+  let f e = (,e) ∘ view pkg ⊳ e ⊣ attrPath
   in    ManifestElementMap ∘ Map.fromList ⩺ fmap catMaybes ∘ sequence
       ∘ fmap (fmap f) ∘ fmap parseJSON $ toList as
 
@@ -151,6 +164,11 @@ elements = Map.elems ∘ unManifestElementMap ∘ elementMap ∘ contents
 
 ----------------------------------------
 
+names ∷ Manifest → [Pkg]
+names = Map.keys ∘ unManifestElementMap ∘ elementMap ∘ contents
+
+----------------------------------------
+
 mkManifest ∷ AbsFile → ManifestContents → Manifest
 mkManifest f cs =  Manifest { location = f, contents = cs }
 
@@ -171,7 +189,7 @@ instance Printable Manifest where
   print m =
     let getName e = case getNameVerPathPrio @TextualParseError e of
                       𝕷 err           → toText err
-                      𝕽 𝕹             → pack $ show e
+                      𝕽 𝕹             → T.pack $ show e
                       𝕽 (𝕵 (p,_,_,_)) → toText p
 
     in  P.text $ [fmt|manifest: %L|] [ getName e | e ← elements m ]
@@ -191,6 +209,10 @@ getNameVerPathPrio e =
         𝕵 ap → (,ver,path,prio) ⊳ apPkg (toText ap)
         𝕹    → return (pkgs,ver,path,prio)
 
+----------------------------------------
+
+attrPaths ∷ Manifest → [AttrPath]
+attrPaths m = catMaybes [ e ⊣ attrPath | e ← elements m ]
 
 -- tests -----------------------------------------------------------------------
 

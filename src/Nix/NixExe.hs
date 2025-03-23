@@ -32,10 +32,6 @@ import FPath.AbsFile          ( AbsFile )
 import FPath.AsFilePath       ( filepath )
 import FPath.Error.FPathError ( AsFPathError )
 
--- lens --------------------------------
-
-import Control.Lens.Getter ( view )
-
 -- log-plus ----------------------------
 
 import Log ( Log )
@@ -74,7 +70,7 @@ import Control.Monad.Reader ( MonadReader )
 
 -- text --------------------------------
 
-import Data.Text          ( pack )
+import Data.Text          qualified as T
 import Data.Text.Encoding ( encodeUtf8 )
 
 -- textual-plus ------------------------
@@ -85,12 +81,10 @@ import TextualPlus.Error.TextualParseError ( AsTextualParseError )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import Nix.Paths          qualified as Paths
-import Nix.Types.AttrPath qualified as AttrPath
+import Nix.Paths qualified as Paths
 
-import Nix.Types             ( Priority(unPriority), ProfileDir,
+import Nix.Types             ( Pkg, Priority(unPriority), ProfileDir,
                                RemoteState, remoteArgs )
-import Nix.Types.AttrPath    ( AttrPath )
 import Nix.Types.ConfigDir   ( ConfigDir(unConfigDir) )
 import Nix.Types.FlakePkgs   ( FlakePkgs(FlakePkgs), flakeShowTestInput )
 import Nix.Types.ToBriefText ( ToBriefText(toT) )
@@ -121,11 +115,11 @@ mkTargets config_dir attr_paths =
 
 msg ∷ ∀ τ δ φ η . (MonadIO η, Foldable φ, Printable τ, ToBriefText τ,
                    HasDoMock δ, MonadReader δ η, MonadLog (Log MockIOClass) η) ⇒
-      𝕋 → τ → φ AttrPath → η ()
-msg verb object attr_paths = do
-  let names = sort $ toText ∘ view AttrPath.pkg ⊳ toList attr_paths
+      𝕋 → τ → φ Pkg → η ()
+msg verb object pkgs = do
+  let names = sort $ toText ⊳ toList pkgs
   warn $ [fmt|%t (%t): %L|] verb (toT object) names
-  notice $ [fmt|%t: (%T) %L|] verb object attr_paths
+  notice $ [fmt|%t: (%T) %L|] verb object pkgs
 
 ----------------------------------------
 
@@ -133,7 +127,7 @@ nixBuild ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
                       AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                       AsProcExitError ε, Printable ε, MonadError ε μ,
                       MonadLog (Log MockIOClass) μ) ⇒
-           RemoteState → ConfigDir → NonEmpty AttrPath → μ ()
+           RemoteState → ConfigDir → NonEmpty Pkg → μ ()
 nixBuild r config_dir attr_paths = do
   msg "building" config_dir attr_paths
   let targets = mkTargets config_dir attr_paths
@@ -146,12 +140,12 @@ nixProfileRemove ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ
                               AsIOError ε, AsFPathError ε, AsCreateProcError ε,
                               AsProcExitError ε, Printable ε, MonadError ε μ,
                               MonadLog (Log MockIOClass) μ) ⇒
-                   RemoteState → ProfileDir → [AttrPath] → μ ()
+                   RemoteState → ProfileDir → [Pkg] → μ ()
 nixProfileRemove _ _ [] = return ()
-nixProfileRemove r profile attr_paths = do
-  msg "removing" profile attr_paths
+nixProfileRemove r profile pkgs = do
+  msg "removing" profile pkgs
   nixDo 𝕹 $ ю [ [ "profile", "remove", "--verbose", "--profile", toText profile]
-              , remoteArgs r, toText ⊳ attr_paths ]
+              , remoteArgs r, toText ⊳ pkgs ]
 
 ----------------------------------------
 
@@ -161,11 +155,11 @@ nixProfileInstall ∷ ∀ ε δ μ .
                      AsProcExitError ε, Printable ε, MonadError ε μ,
                      MonadLog (Log MockIOClass) μ) ⇒
                     RemoteState → ConfigDir → ProfileDir
-                  → 𝕄 Priority→NonEmpty AttrPath→μ ()
-nixProfileInstall r config_dir profile prio_m attr_paths = do
+                  → 𝕄 Priority → NonEmpty Pkg → μ ()
+nixProfileInstall r config_dir profile prio_m pkgs = do
   let verb = maybe "" [fmt| «prio %T»|] prio_m
-  msg ("installing" ◇ verb) (config_dir, profile) (NonEmpty.sort attr_paths)
-  let targets = mkTargets config_dir attr_paths
+  msg ("installing" ◇ verb) (config_dir, profile) (NonEmpty.sort pkgs)
+  let targets = mkTargets config_dir pkgs
   let extra_args = maybe [] (\ p → ["--priority", [fmt|%d|] (unPriority p)])
                          prio_m
   nixDo 𝕹 $ ю [ [ "profile", "install", "--profile", toText profile ]
@@ -190,7 +184,7 @@ nixFlakeShow r d = do
                  in  (& mock_value ⊢ mock_val)
       args     = ю [ ["flake", "show", "--json" ]
                    , remoteArgs r
-                   , [ pack $ (unConfigDir d) ⫥ filepath ] ]
+                   , [ T.pack $ (unConfigDir d) ⫥ filepath ] ]
   flake_show ← nixDo (𝕵 mock_set) args
   eAsAesonError (FlakePkgs d ⊳ eitherDecodeStrict' (encodeUtf8 flake_show))
 

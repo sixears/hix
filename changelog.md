@@ -1,3 +1,7 @@
+0.1.6.0 2025-03-23
+==================
+- use pkg names rather than attr paths for install/remove operations, now that nix supports it
+
 0.1.5.0 2025-02-26
 ==================
 - add support for v3 manifests
