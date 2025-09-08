@@ -78,24 +78,24 @@ url = lens _url (\ me a → me { _url = a })
 
 manifestElement1 ∷ ManifestElement
 manifestElement1 =
-  ManifestElement { _active = 𝕿
-                  , _priority = 𝕵 (Priority 5)
+  ManifestElement { _active = 𝓣
+                  , _priority = 𝓙 (Priority 5)
                   , _storePaths = [TestData.storePath1]
-                  , _attrPath = 𝕵 TestData.attrPath1
-                  , _originalURL = 𝕹
-                  , _url = 𝕵 $ toText TestData.url1
+                  , _attrPath = 𝓙 TestData.attrPath1
+                  , _originalURL = 𝓝
+                  , _url = 𝓙 $ toText TestData.url1
                   }
 
 --------------------
 
 manifestElement2 ∷ ManifestElement
 manifestElement2 =
-  ManifestElement { _active = 𝕿
-                  , _priority = 𝕵 (Priority 3)
+  ManifestElement { _active = 𝓣
+                  , _priority = 𝓙 (Priority 3)
                   , _storePaths = [TestData.storePath2]
-                  , _attrPath = 𝕵 TestData.attrPath2
-                  , _originalURL = 𝕹
-                  , _url = 𝕵 $ toText TestData.url2
+                  , _attrPath = 𝓙 TestData.attrPath2
+                  , _originalURL = 𝓝
+                  , _url = 𝓙 $ toText TestData.url2
                   }
 
 --------------------

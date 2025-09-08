@@ -96,7 +96,7 @@ instance TextualPlus Pkg where
     let alpha_under_score      ∷ CharParsing η ⇒ η ℂ
         alpha_under_score      = satisfy (\ c → isAlpha c ∨ c ≡ '_')
         non_hyphen             ∷ CharParsing η ⇒ η ℂ
-        non_hyphen             = satisfy (\ c → isAlphaNum c ∨ c ∈ "_.")
+        non_hyphen             = satisfy (\ c → isAlphaNum c ∨ c ∈ ("_."∷𝕋))
         simple_identifier      ∷ CharParsing η ⇒ η 𝕊
         simple_identifier      = (:) ⊳ alpha_under_score ⊵ many non_hyphen
     in  (Pkg ∘ pack) ⊳ intercalate "-"
@@ -123,7 +123,7 @@ newtype Ver = Ver { unVer :: 𝕋 }
   deriving newtype (Eq, IsString, Printable, Show)
 
 instance TextualPlus Ver where
-  textual' = let alNumHypUnderDot = satisfy (\c → isAlphaNum c ∨ c ∈ "-_.")
+  textual' = let alNumHypUnderDot = satisfy (\c → isAlphaNum c ∨ c ∈ ("-_."∷𝕋))
              in  fromString ⊳ ((:) ⊳ digit ⊵ many alNumHypUnderDot)
 
 ------------------------------------------------------------
@@ -153,13 +153,13 @@ nixOption ∷ (𝕋,𝕋) → [𝕋]
 nixOption (k,v) = [ "--option", k, v ]
 
 substituters ∷ 𝕄 𝕋 → [𝕋]
-substituters 𝕹     = []
-substituters (𝕵 x) = nixOption ("substituters",x)
+substituters 𝓝     = []
+substituters (𝓙 x) = nixOption ("substituters",x)
 
 remoteArgs ∷ RemoteState → [𝕋]
 remoteArgs r = substituters (go r)
-               where go FullyConnected = 𝕹
-                     go Isolated       = 𝕵 ""
-                     go Remote         = 𝕵 nixosCache
+               where go FullyConnected = 𝓝
+                     go Isolated       = 𝓙 ""
+                     go Remote         = 𝓙 nixosCache
 
 -- that's all, folks! ----------------------------------------------------------

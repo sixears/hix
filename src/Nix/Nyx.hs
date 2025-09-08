@@ -25,8 +25,7 @@ import Data.Aeson.Error ( AsAesonError )
 
 -- base --------------------------------
 
-import Data.Foldable      ( Foldable, concat )
-import Data.Function      ( flip )
+import Data.Foldable      ( concat )
 import Data.List          ( intersect, sort, sortOn )
 import Data.List.NonEmpty ( nonEmpty )
 import Data.Tuple         ( swap, uncurry )
@@ -76,10 +75,6 @@ import MonadIO                       ( say )
 import MonadIO.Base                  ( getArgs )
 import MonadIO.Error.CreateProcError ( AsCreateProcError )
 import MonadIO.Error.ProcExitError   ( AsProcExitError )
-
--- more-unicode ------------------------
-
-import Data.MoreUnicode.Monad ( (⮞) )
 
 -- mtl ---------------------------------
 
@@ -132,8 +127,8 @@ import Nix.Types.Manifest   ( names )
 partitionMaybes ∷ [(α, 𝕄 β)] → ([α], [(α,β)])
 partitionMaybes = go ([],[])
   where go (naes,yaes) []             = (naes, yaes)
-        go (naes,yaes) ((a,𝕹) : xs)   = go (a:naes, yaes) xs
-        go (naes,yaes) ((a,𝕵 b) : xs) = go (naes, (a,b) : yaes) xs
+        go (naes,yaes) ((a,𝓝) : xs)   = go (a:naes, yaes) xs
+        go (naes,yaes) ((a,𝓙 b) : xs) = go (naes, (a,b) : yaes) xs
 
 ----------------------------------------
 
@@ -169,8 +164,8 @@ collectPackages r cs pkgs =
         SomePackages ps → return ps
         AllPackages →
           case nonEmpty $ x86_64_pkgs flkPkgs of
-            𝕹    → throwUsageT $ [fmt|no packages found: %T|] config_dir
-            𝕵 ps → return ps
+            𝓝    → throwUsageT $ [fmt|no packages found: %T|] config_dir
+            𝓙 ps → return ps
     partitionMaybes ∘ toList ⊳ pkgFindNames' flkPkgs pkgs' ≫ \ case
       (missing:[],_) →
         throwUsageT $ [fmt|package not found in %T: %T|] c missing
@@ -178,9 +173,9 @@ collectPackages r cs pkgs =
         throwUsageT $ [fmt|packages not found in %T: %L|] c missing
       ([],pkgs'' ∷ [(Pkg,(AttrPath, (𝕄 Priority)))]) →
         case nonEmpty (first snd ∘ swap ⊳ pkgs'') of
-          𝕵 pkg_attr_path_prios → return (config_dir, target_profile,
+          𝓙 pkg_attr_path_prios → return (config_dir, target_profile,
                                           multiMap $ pkg_attr_path_prios)
-          𝕹 →
+          𝓝 →
             throwUsageT $ intercalate " " [ "internal error: nonEmpty pkgs'"
                                           , "means this should never happen"])
 

@@ -148,8 +148,8 @@ findPkg_ ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η)⇒
            (Pkg → AbsFile → η (𝕄 ℕ)) → Pkg → Manifest → η (𝕄 ℕ)
 findPkg_ throw p m = do
   findPkgs p m ≫ \ case
-    []   → return 𝕹
-    [p'] → return ∘ 𝕵 $ p'
+    []   → return 𝓝
+    [p'] → return ∘ 𝓙 $ p'
     _    → throw p (location m)
 
 findPkg ∷ ∀ ε η.(AsNixDuplicatePkgError ε,AsTextualParseError ε,MonadError ε η)⇒

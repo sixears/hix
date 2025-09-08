@@ -180,7 +180,7 @@ readManifestFile ∷ ∀ ε ω μ .
                     Default ω, HasIOClass ω, HasDoMock ω, MonadLog (Log ω) μ) ⇒
                    Severity → AbsFile → μ (𝔼 𝕊 Manifest)
 readManifestFile sev f = do
-  bs ← ask ≫ readFile sev 𝕹 (return "") f
+  bs ← ask ≫ readFile sev 𝓝 (return "") f
   return $ mkManifest f ⊳ eitherDecodeStrict' bs
 
 --------------------
@@ -188,9 +188,9 @@ readManifestFile sev f = do
 instance Printable Manifest where
   print m =
     let getName e = case getNameVerPathPrio @TextualParseError e of
-                      𝕷 err           → toText err
-                      𝕽 𝕹             → T.pack $ show e
-                      𝕽 (𝕵 (p,_,_,_)) → toText p
+                      𝓛 err           → toText err
+                      𝓡 𝓝             → T.pack $ show e
+                      𝓡 (𝓙 (p,_,_,_)) → toText p
 
     in  P.text $ [fmt|manifest: %L|] [ getName e | e ← elements m ]
 
@@ -201,13 +201,13 @@ getNameVerPathPrio ∷ ∀ ε η . (AsTextualParseError ε, MonadError ε η) �
                      ManifestElement → η (𝕄 (Pkg, 𝕄 Ver, AbsDir, 𝕄 Priority))
 getNameVerPathPrio e =
   case head $ e ⊣ storePaths of
-    𝕹 → return 𝕹
-    𝕵 p → 𝕵 ⊳ do
+    𝓝 → return 𝓝
+    𝓙 p → 𝓙 ⊳ do
       (pkgs,ver,path) ← spPkgVerPath ⊳ tparse p
       let prio = e ⊣ priority
       case e ⊣ attrPath of
-        𝕵 ap → (,ver,path,prio) ⊳ apPkg (toText ap)
-        𝕹    → return (pkgs,ver,path,prio)
+        𝓙 ap → (,ver,path,prio) ⊳ apPkg (toText ap)
+        𝓝    → return (pkgs,ver,path,prio)
 
 ----------------------------------------
 

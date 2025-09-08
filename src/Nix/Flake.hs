@@ -35,7 +35,6 @@ import Data.Aeson.Error ( AsAesonError )
 -- base --------------------------------
 
 import Control.Monad.Fail ( MonadFail(fail) )
-import Data.Function      ( flip )
 import Data.Maybe         ( catMaybes, fromMaybe )
 import Data.Tuple         ( uncurry )
 
@@ -166,8 +165,8 @@ x86_64_ = go x86_64Linux
 {-| apply a function to each named `FlakePkg` in x86_64-linux packages -}
 forX86_64Pkg ∷ FlakePkgs → (Pkg → FlakePkg → α) → [α]
 forX86_64Pkg fps f = case x86_64 fps of
-  𝕵 pkg_map → (uncurry f) ⊳ (Map.toList pkg_map)
-  𝕹         → []
+  𝓙 pkg_map → (uncurry f) ⊳ (Map.toList pkg_map)
+  𝓝         → []
 
 ----------------------------------------
 
@@ -175,8 +174,8 @@ forX86_64Pkg fps f = case x86_64 fps of
     packages -}
 forMX86_64Pkg ∷ Monad η ⇒ FlakePkgs → (Pkg → FlakePkg → η α) → η [α]
 forMX86_64Pkg fps f = case x86_64 fps of
-  𝕵 pkg_map → forM (Map.toList pkg_map) (uncurry f)
-  𝕹         → return []
+  𝓙 pkg_map → forM (Map.toList pkg_map) (uncurry f)
+  𝓝         → return []
 
 ----------------------------------------
 
@@ -202,8 +201,8 @@ pkgFindName_ ∷ ∀ ε η . (MonadError ε η) ⇒
                (Pkg → AbsFile → η (𝕄 (AttrPath,𝕄 Priority))) → FlakePkgs → Pkg
              → η (𝕄 (AttrPath, 𝕄 Priority))
 pkgFindName_ t fp p = case pkgFind fp p of
-                     []     → return 𝕹
-                     [apfp] → return $ 𝕵 (pkgName apfp)
+                     []     → return 𝓝
+                     [apfp] → return $ 𝓙 (pkgName apfp)
                      _      → t p (locFile fp)
 
 --------------------
@@ -265,7 +264,7 @@ flakeShowNM r = flip runReaderT NoMock ∘ flakeShow r
 flakeDecodeTests ∷ TestTree
 flakeDecodeTests =
   testCase "flakeDecode" $
-    𝕽 (FlakePkgs' $ Map.fromList [("x86_64-linux",flakeShowTestMap)] ) @=?
+    𝓡 (FlakePkgs' $ Map.fromList [("x86_64-linux",flakeShowTestMap)] ) @=?
       eitherDecodeStrict' (encodeUtf8 flakeShowTestInput)
 
 ----------------------------------------
@@ -307,8 +306,8 @@ pkgPrioritiesFromList pkps =
            Map.Map Pkg Priority → PkgPriority → η (Map.Map Pkg Priority)
       go pps (PkgPriority (p,y)) =
         case p `Map.lookup` pps of
-          𝕹 → return $ Map.insert p y pps
-          𝕵 y' → fail $ [fmt|duplicate priorities found for %T: (%T,%T)|] p y y'
+          𝓝 → return $ Map.insert p y pps
+          𝓙 y' → fail $ [fmt|duplicate priorities found for %T: (%T,%T)|] p y y'
   in  PkgPriorities ⊳ foldM go Map.empty pkps
 
 instance Printable PkgPriorities where
@@ -327,15 +326,15 @@ readPriorities ∷ ∀ ε γ ω μ .
 
 readPriorities f =
   let fmsg ∷ 𝕄 (File → 𝕋)
-      fmsg = 𝕵 [fmt|reading priorities: %T|]
+      fmsg = 𝓙 [fmt|reading priorities: %T|]
   in  readFileY @_ @𝕋 Notice fmsg ф f NoMock ≫ tparse ∘ fromMaybe ""
 
 ----------------------------------------
 
 x86_64_pkgs ∷ FlakePkgs → [Pkg]
 x86_64_pkgs fp = case x86_64 fp of
-                   𝕹   → []
-                   𝕵 m → Map.keys m
+                   𝓝   → []
+                   𝓙 m → Map.keys m
 
 ----------------------------------------
 

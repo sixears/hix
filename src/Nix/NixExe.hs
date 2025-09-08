@@ -19,9 +19,6 @@ import Data.List        ( sort )
 
 import Data.List.NonEmpty qualified as NonEmpty
 
-import Data.Foldable ( Foldable )
-import Data.Functor  ( Functor )
-
 -- env-plus ----------------------------
 
 import Env.Types ( EnvModFrag, ә, ӭ )
@@ -101,8 +98,8 @@ nixDo ∷ ∀ ε α δ ζ φ μ .
          MonadLog (Log MockIOClass) μ) ⇒
         (𝕄 (MLCmdSpec α → MLCmdSpec α)) → φ 𝕋 → μ α
 
-nixDo 𝕹 args = snd ⊳ ꙩ (Paths.nix, toList args, [ӭ (ә "NIX_CONFIG")])
-nixDo (𝕵 mock_set) args =
+nixDo 𝓝 args = snd ⊳ ꙩ (Paths.nix, toList args, [ӭ (ә "NIX_CONFIG")])
+nixDo (𝓙 mock_set) args =
   snd ⊳ ꙩ (Paths.nix, toList args, [ӭ (ә "NIX_CONFIG")], mock_set)
 
 ----------------------------------------
@@ -131,7 +128,7 @@ nixBuild ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ,
 nixBuild r config_dir attr_paths = do
   msg "building" config_dir attr_paths
   let targets = mkTargets config_dir attr_paths
-  nixDo 𝕹 $ ю [ [ "build", "--log-format", "bar-with-logs", "--no-link" ]
+  nixDo 𝓝 $ ю [ [ "build", "--log-format", "bar-with-logs", "--no-link" ]
               , remoteArgs r, toList targets ]
 
 ----------------------------------------
@@ -144,7 +141,7 @@ nixProfileRemove ∷ ∀ ε δ μ . (MonadIO μ, MonadReader δ μ, HasDoMock δ
 nixProfileRemove _ _ [] = return ()
 nixProfileRemove r profile pkgs = do
   msg "removing" profile pkgs
-  nixDo 𝕹 $ ю [ [ "profile", "remove", "--verbose", "--profile", toText profile]
+  nixDo 𝓝 $ ю [ [ "profile", "remove", "--verbose", "--profile", toText profile]
               , remoteArgs r, toText ⊳ pkgs ]
 
 ----------------------------------------
@@ -162,7 +159,7 @@ nixProfileInstall r config_dir profile prio_m pkgs = do
   let targets = mkTargets config_dir pkgs
   let extra_args = maybe [] (\ p → ["--priority", [fmt|%d|] (unPriority p)])
                          prio_m
-  nixDo 𝕹 $ ю [ [ "profile", "install", "--profile", toText profile ]
+  nixDo 𝓝 $ ю [ [ "profile", "install", "--profile", toText profile ]
               , remoteArgs r
               , extra_args, toList targets ]
 
@@ -185,7 +182,7 @@ nixFlakeShow r d = do
       args     = ю [ ["flake", "show", "--json" ]
                    , remoteArgs r
                    , [ T.pack $ (unConfigDir d) ⫥ filepath ] ]
-  flake_show ← nixDo (𝕵 mock_set) args
+  flake_show ← nixDo (𝓙 mock_set) args
   eAsAesonError (FlakePkgs d ⊳ eitherDecodeStrict' (encodeUtf8 flake_show))
 
 -- that's all, folks! ----------------------------------------------------------

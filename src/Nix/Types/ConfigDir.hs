@@ -125,8 +125,8 @@ configDirName = configNameFromDir ∘ unConfigDir
 configNameFromDir ∷ (DirAs δ, Element (RelType δ) ~ PathComponent,
                      MonoFoldable (RelType δ), Basename δ) ⇒ δ → ConfigName
 configNameFromDir d = case lastMay ∘ otoList $ basename d of
-                        𝕹   → error $ [fmt|could not find ConfigName of %T|] d
-                        𝕵 p → ConfigName p
+                        𝓝   → error $ [fmt|could not find ConfigName of %T|] d
+                        𝓙 p → ConfigName p
 
 ----------------------------------------
 
@@ -150,8 +150,8 @@ configDirFromAbs f = do
   pResolve f ≫ \ case
     AbsD d → return $ ConfigDir d
     AbsF f' → isDir f' ≫ \ case
-      𝕿 → return ∘ ConfigDir $ toDir f'
-      𝕱 → if basename f' ≡ [relfile|flake.nix|]
+      𝓣 → return ∘ ConfigDir $ toDir f'
+      𝓕 → if basename f' ≡ [relfile|flake.nix|]
           then return ∘ ConfigDir $ f' ⊣ dirname
           else parse @PathComponent f ≫ configDir ∘ ConfigName
 

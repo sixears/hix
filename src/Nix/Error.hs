@@ -141,7 +141,7 @@ instance AsNixError NixError where
 
 instance AsNixDuplicatePkgError NixError where
   _NixDuplicatePkgError = prism' NIX_DUPLICATE_PKG
-                                 (\ case (NIX_DUPLICATE_PKG e) → 𝕵 e {- ; _ → 𝕹 -})
+                                 (\ case (NIX_DUPLICATE_PKG e) → 𝓙 e {- ; _ → 𝓝 -})
 
 ------------------------------------------------------------
 
@@ -163,11 +163,11 @@ data NixProgramError = UPAFPPIO_ERROR UsageParseAesonFPPIOError
 _UPAFPPIO_ERROR ∷ Prism' NixProgramError UsageParseAesonFPPIOError
 _UPAFPPIO_ERROR =
   prism' (\ e → UPAFPPIO_ERROR e)
-         (\ case UPAFPPIO_ERROR e → 𝕵 e; _ → 𝕹)
+         (\ case UPAFPPIO_ERROR e → 𝓙 e; _ → 𝓝)
 
 _NIX_ERROR ∷ Prism' NixProgramError NixError
 _NIX_ERROR = prism' (\ e → NIX_ERROR e)
-                                (\ case NIX_ERROR e → 𝕵 e; _ → 𝕹)
+                                (\ case NIX_ERROR e → 𝓙 e; _ → 𝓝)
 
 --------------------
 

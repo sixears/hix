@@ -76,7 +76,7 @@ storePathRE = (\ h (unPkgMVer → (p,v)) → (fromString h, p, v)) ⊳
 
 instance Printable StorePath where
   print (StorePath _ h p v) =
-    let v' = case v of 𝕹 → ""; 𝕵 v_ → "-" ⊕ unVer v_
+    let v' = case v of 𝓝 → ""; 𝓙 v_ → "-" ⊕ unVer v_
     in  P.text $ [fmt|/nix/store/%T-%T-%T/|] h p v'
 
 instance TextualPlus StorePath where
@@ -113,7 +113,7 @@ tests =
         checkT path' (StorePath { _path' = path
                                 , _hash  = hash
                                 , _pkg'  = "atreus"
-                                , _ver   = 𝕵 "1.0.2.0"
+                                , _ver   = 𝓙 "1.0.2.0"
                                 })
     , let
         hash          = "g9zcvd6f5aasrxwm48bdbks3scv46b6x"
@@ -129,7 +129,7 @@ tests =
                                 -- unsatisfying; but I can't see how to
                                 -- distinguish from e.g., bash-5.1-p16, where
                                 -- p16 *is* part of the version
-                                , _ver   = 𝕵 "1.6-bin" })
+                                , _ver   = 𝓙 "1.6-bin" })
     ]
 
 _test ∷ IO ExitCode

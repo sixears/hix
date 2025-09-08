@@ -5,15 +5,10 @@ module Nix.Profile
 
 import Base1T
 
--- base --------------------------------
-
-import Data.Function ( flip )
-
 -- fpath -------------------------------
 
-import FPath.AbsDir          ( AbsDir, absdir )
-import FPath.AppendableFPath ( (⫻) )
--- import FPath.Dir              ( Dir(DirA, DirR) )
+import FPath.AbsDir           ( AbsDir, absdir )
+import FPath.AppendableFPath  ( (⫻) )
 import FPath.Error.FPathError ( AsFPathError )
 import FPath.Parseable        ( parse, parseDir )
 import FPath.PathComponent    ( PathComponent, pc )
@@ -106,12 +101,12 @@ instance AsProfileDir 𝕋 where
   nixProfileAbsDir p = do
     userName ← getUserName' ≫ parseDir ∘ toText
     case (≡ '/') `Data.Text.find` p of
-      𝕹   → do n ← parse @RelFile p
+      𝓝   → do n ← parse @RelFile p
                return ∘ ProfileDir $ perUserProfiles ⫻ userName ⫻ toDir n
-      𝕵 _ → ProfileDir ⊳ pResolve p
+      𝓙 _ → ProfileDir ⊳ pResolve p
 
 instance AsProfileDir (𝕄 𝕋) where
-  nixProfileAbsDir 𝕹     = defaultAbsProfile
-  nixProfileAbsDir (𝕵 t) = nixProfileAbsDir t
+  nixProfileAbsDir 𝓝     = defaultAbsProfile
+  nixProfileAbsDir (𝓙 t) = nixProfileAbsDir t
 
 -- that's all, folks! ----------------------------------------------------------

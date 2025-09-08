@@ -90,7 +90,7 @@ instance FromJSON AttrPath where
 checkT ∷ (TextualPlus α, Eq α, Show α) ⇒ 𝕋 → α → TestTree
 checkT input exp =
   testCase ("parseText: " ⊕ unpack input) $
-    𝕽 exp @=? (tparseToME' ∘ parseText) input
+    𝓡 exp @=? (tparseToME' ∘ parseText) input
 
 ----------------------------------------
 

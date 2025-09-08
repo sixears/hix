@@ -1,3 +1,7 @@
+0.1.6.1 2025-09-08
+==================
+- upgrade to specify type when using ∈ on overloaded strings; also 𝕱→𝓕, etc.
+
 0.1.6.0 2025-03-23
 ==================
 - use pkg names rather than attr paths for install/remove operations, now that nix supports it

@@ -8,8 +8,7 @@ import Base1T
 
 -- base --------------------------------
 
-import Data.Function ( flip )
-import System.IO     ( hPutStrLn, stderr )
+import System.IO  ( hPutStrLn, stderr )
 
 -- fpath -------------------------------
 
@@ -128,9 +127,9 @@ output_data options manifest =
 
       print_name_ver (i,e) = do
         case getNameVerPathPrio @TextualParseError e of
-          𝕷 err           → pShow err
-          𝕽 𝕹             → return ()
-          𝕽 (𝕵 (n,v,p,r)) → putStrLn (intercalate "\t" $ get_columns i n v p r)
+          𝓛 err           → pShow err
+          𝓡 𝓝             → return ()
+          𝓡 (𝓙 (n,v,p,r)) → putStrLn (intercalate "\t" $ get_columns i n v p r)
 
   in forM_ (elementsi manifest) print_name_ver
 
@@ -142,8 +141,8 @@ myMain ∷ ∀ ε . (HasCallStack, Printable ε, AsUsageError ε,
 myMain options = do
   -- Strict' version performs conversion immediately
   flip runReaderT NoMock $ readManifest Informational (profileName options) ≫ \ case
-    𝕷 e     → liftIO $ hPutStrLn stderr $ show e
-    𝕽 stuff → liftIO $ output_data options stuff
+    𝓛 e     → liftIO $ hPutStrLn stderr $ show e
+    𝓡 stuff → liftIO $ output_data options stuff
   return 0
 
 ----------------------------------------

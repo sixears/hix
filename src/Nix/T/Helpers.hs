@@ -17,6 +17,6 @@ import Data.ByteString qualified as BS
 
 checkFromJSON ∷ (FromJSON α, Eq α, Show α) ⇒ 𝕊 → BS.ByteString → α → TestTree
 checkFromJSON name input exp =
-  testCase name $ 𝕽 exp @=? eitherDecodeStrict' input
+  testCase name $ 𝓡 exp @=? eitherDecodeStrict' input
 
 -- that's all, folks! ----------------------------------------------------------

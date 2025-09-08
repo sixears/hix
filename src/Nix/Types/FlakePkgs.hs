@@ -72,8 +72,8 @@ pkgVer ∷ FlakePkg → 𝕋
 pkgVer f =
   let p = toText $ f ⊣ pkg
   in  case f ⊣ ver of
-        𝕹   → p
-        𝕵 v → [fmt|%t-%T|] p v
+        𝓝   → p
+        𝓙 v → [fmt|%t-%T|] p v
 
 instance FromJSON FlakePkg where
   parseJSON =
@@ -82,9 +82,9 @@ instance FromJSON FlakePkg where
           name ← v .: "name"
           (p,vers) ← unPkgMVer ⊳ parseTextM "PkgMVer" name
           FlakePkg ⊳ v .:? "description" ⊵ return p ⊵ return vers ⊵ v .: "type"
-                   -- when reading the flake show output, priority is always 𝕹
+                   -- when reading the flake show output, priority is always 𝓝
                    -- as we read this from flake.priorities
-                   ⊵ pure 𝕹
+                   ⊵ pure 𝓝
 instance Printable FlakePkg where
   print = P.text ∘ pkgVer
 
@@ -168,25 +168,25 @@ flakeShowTestInput =
 
 flakeShowTestMap ∷ Map.Map Pkg FlakePkg
 flakeShowTestMap = fromList [ ("binutils",
-                               FlakePkg { _description = 𝕵 "MOCK MOCK MOCK"
+                               FlakePkg { _description = 𝓙 "MOCK MOCK MOCK"
                                         , _pkg = "binutils-wrapper"
                                         , _ver = Just "2.38"
                                         , _type = "derivation"
-                                        , _priority = 𝕹
+                                        , _priority = 𝓝
                                         })
                             , ("get-iplayer-config",
-                               FlakePkg { _description = 𝕹
+                               FlakePkg { _description = 𝓝
                                         , _pkg = "get-iplayer-config"
-                                        , _ver = 𝕹
+                                        , _ver = 𝓝
                                         , _type = "derivation"
-                                        , _priority = 𝕹
+                                        , _priority = 𝓝
                                         })
                             , ("graph-easy",
-                               FlakePkg { _description = 𝕵 "MOCK MOCKETY MOCK"
+                               FlakePkg { _description = 𝓙 "MOCK MOCKETY MOCK"
                                         , _pkg = "perl5.34.1-Graph-Easy"
-                                        , _ver = 𝕵 "0.76"
+                                        , _ver = 𝓙 "0.76"
                                         , _type = "derivation"
-                                        , _priority = 𝕹
+                                        , _priority = 𝓝
                                         })
                             ]
 
