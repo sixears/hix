@@ -1,3 +1,7 @@
+0.1.7.0 2026-07-07
+==================
+- allow `+` in version strings
+
 0.1.6.1 2025-09-08
 ==================
 - upgrade to specify type when using ∈ on overloaded strings; also 𝕱→𝓕, etc.

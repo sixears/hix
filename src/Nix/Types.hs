@@ -123,8 +123,9 @@ newtype Ver = Ver { unVer :: 𝕋 }
   deriving newtype (Eq, IsString, Printable, Show)
 
 instance TextualPlus Ver where
-  textual' = let alNumHypUnderDot = satisfy (\c → isAlphaNum c ∨ c ∈ ("-_."∷𝕋))
-             in  fromString ⊳ ((:) ⊳ digit ⊵ many alNumHypUnderDot)
+  textual' =
+    let alNumHypUnderDotPlus = satisfy (\ c → isAlphaNum c ∨ c ∈ ("-_.+"∷𝕋))
+    in  fromString ⊳ ((:) ⊳ digit ⊵ many alNumHypUnderDotPlus)
 
 ------------------------------------------------------------
 
